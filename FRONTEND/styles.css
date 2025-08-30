@@ -13,6 +13,128 @@ body {
     color: #333;
 }
 
+/* Sample Predictor Styles */
+.sample-predictor-container {
+    margin: 20px 0;
+}
+
+.predictor-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    text-align: center;
+}
+
+.predictor-card h3 {
+    color: #4a5568;
+    margin-bottom: 10px;
+    font-size: 1.2em;
+}
+
+.predictor-card p {
+    color: #718096;
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.sample-predict-btn {
+    background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 1em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(66, 153, 225, 0.3);
+}
+
+.sample-predict-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(66, 153, 225, 0.4);
+}
+
+.sample-predict-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.sample-error {
+    color: #e53e3e;
+    background: rgba(254, 226, 226, 0.8);
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 15px;
+    border: 1px solid rgba(252, 165, 165, 0.5);
+}
+
+.sample-results {
+    margin-top: 20px;
+    text-align: right;
+}
+
+.sample-results h4 {
+    color: #2d3748;
+    margin-bottom: 15px;
+    font-size: 1.1em;
+}
+
+.predictions-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.predictions-table th,
+.predictions-table td {
+    padding: 12px;
+    text-align: center;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.predictions-table th {
+    background: #f7fafc;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+.predictions-table tr:last-child td {
+    border-bottom: none;
+}
+
+.predictions-table tr:hover {
+    background: #f7fafc;
+}
+
+.json-details {
+    margin-top: 15px;
+}
+
+.json-details summary {
+    cursor: pointer;
+    color: #4299e1;
+    font-weight: 500;
+    margin-bottom: 10px;
+}
+
+.json-details pre {
+    background: #2d3748;
+    color: #e2e8f0;
+    padding: 15px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
 .container {
     max-width: 1200px;
     margin: 0 auto;

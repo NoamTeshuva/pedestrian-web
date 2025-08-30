@@ -40,6 +40,20 @@
 
         <div id="statusMessage" class="status-message hidden"></div>
 
+        <!-- Sample Predictor -->
+        <div id="samplePredictorContainer" class="sample-predictor-container">
+            <div class="predictor-card">
+                <h3>דוגמה מהירה לחיזוי</h3>
+                <p>לחץ על הכפתור לקבלת דוגמה לחיזוי המודל עבור שני רחובות</p>
+                <button id="samplePredictBtn" class="sample-predict-btn">
+                    <span id="sampleBtnText">נסה חיזוי לדוגמה</span>
+                    <span id="sampleLoadingSpinner" class="spinner hidden">⏳</span>
+                </button>
+                <div id="sampleError" class="sample-error hidden"></div>
+                <div id="sampleResults" class="sample-results hidden"></div>
+            </div>
+        </div>
+
         <div class="results-container">
             <div id="mapContainer" class="map-container">
                 <div class="map-header">

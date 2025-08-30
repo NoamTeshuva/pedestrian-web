@@ -673,6 +673,42 @@ def predict_batch():
         logging.error(f"Batch prediction error: {e}")
         return jsonify({"error": str(e)}), 400
 
+@app.route("/predict-sample", methods=["GET"])
+def predict_sample():
+    """Sample prediction endpoint with hardcoded examples for quick demo."""
+    if model is None:
+        return jsonify({"error": "Model not loaded"}), 503
+        
+    items = [
+        {
+            "edge_id": 1,
+            "betweenness": 0.3,
+            "closeness": 0.1,
+            "Hour": 8,
+            "is_weekend": 0,
+            "time_of_day": "morning",
+            "land_use": "retail",
+            "highway": "primary"
+        },
+        {
+            "edge_id": 2,
+            "betweenness": 0.02,
+            "closeness": 0.01,
+            "Hour": 19,
+            "is_weekend": 1,
+            "time_of_day": "evening",
+            "land_use": "residential",
+            "highway": "residential"
+        }
+    ]
+    
+    try:
+        out = predict_with_model(items)
+        return jsonify(out), 200
+    except Exception as e:
+        logging.error(f"Sample prediction error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/predict", methods=["GET"])
 def predict():
     """Predict pedestrian volume bins (1-5) for the given place and date.

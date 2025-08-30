@@ -26,6 +26,13 @@ class PedestrianPredictionApp {
         this.loadingMessage = document.getElementById('loadingMessage');
         this.detailsContainer = document.getElementById('detailsContainer');
         this.predictionDetails = document.getElementById('predictionDetails');
+        
+        // Sample predictor elements
+        this.samplePredictBtn = document.getElementById('samplePredictBtn');
+        this.sampleBtnText = document.getElementById('sampleBtnText');
+        this.sampleLoadingSpinner = document.getElementById('sampleLoadingSpinner');
+        this.sampleError = document.getElementById('sampleError');
+        this.sampleResults = document.getElementById('sampleResults');
     }
     
     initializeEventListeners() {
@@ -46,6 +53,9 @@ class PedestrianPredictionApp {
                 this.handleSearch(e);
             }
         });
+        
+        // Sample predictor button
+        this.samplePredictBtn.addEventListener('click', () => this.handleSamplePredict());
     }
     
     initializeMap() {
@@ -392,6 +402,98 @@ class PedestrianPredictionApp {
         }
     }
     
+    async handleSamplePredict() {
+        // Clear previous results and errors
+        this.sampleError.classList.add('hidden');
+        this.sampleResults.classList.add('hidden');
+        
+        // Show loading state
+        this.setSampleLoading(true);
+        
+        try {
+            console.log('Calling getSamplePredictions...');
+            const data = await window.getSamplePredictions();
+            console.log('Sample predictions received:', data);
+            
+            this.displaySampleResults(data);
+        } catch (error) {
+            console.error('Sample prediction error:', error);
+            this.showSampleError(`שגיאה: ${error.message}`);
+        } finally {
+            this.setSampleLoading(false);
+        }
+    }
+    
+    setSampleLoading(loading) {
+        this.samplePredictBtn.disabled = loading;
+        
+        if (loading) {
+            this.sampleBtnText.classList.add('hidden');
+            this.sampleLoadingSpinner.classList.remove('hidden');
+        } else {
+            this.sampleBtnText.classList.remove('hidden');
+            this.sampleLoadingSpinner.classList.add('hidden');
+        }
+    }
+    
+    showSampleError(message) {
+        this.sampleError.textContent = message;
+        this.sampleError.classList.remove('hidden');
+    }
+    
+    displaySampleResults(data) {
+        const predictions = data.predictions || [];
+        
+        if (predictions.length === 0) {
+            this.showSampleError('לא התקבלו תוצאות חיזוי');
+            return;
+        }
+        
+        // Create table HTML
+        let tableHTML = `
+            <h4>${predictions.length} תוצאות חיזוי</h4>
+            <table class="predictions-table">
+                <thead>
+                    <tr>
+                        <th>מזהה רחוב</th>
+                        <th>דרגת נפח</th>
+                        <th>הסתברות גבוהה</th>
+                        <th>סוג רחוב</th>
+                        <th>שימוש קרקע</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        predictions.forEach(pred => {
+            const topProb = pred.proba ? Math.max(...pred.proba).toFixed(3) : '-';
+            const highway = pred.features?.highway || '-';
+            const landUse = pred.features?.land_use || '-';
+            
+            tableHTML += `
+                <tr>
+                    <td>${pred.edge_id || '-'}</td>
+                    <td>${pred.volume_class}</td>
+                    <td>${topProb}</td>
+                    <td>${this.translateHighway(highway)}</td>
+                    <td>${this.translateLandUse(landUse)}</td>
+                </tr>
+            `;
+        });
+        
+        tableHTML += `
+                </tbody>
+            </table>
+            <details class="json-details">
+                <summary>נתונים גולמיים (JSON)</summary>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            </details>
+        `;
+        
+        this.sampleResults.innerHTML = tableHTML;
+        this.sampleResults.classList.remove('hidden');
+    }
+
     hideStatusMessage() {
         this.statusMessage.classList.add('hidden');
     }

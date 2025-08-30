@@ -153,8 +153,17 @@ async function simulateVolume(place, edits = [], bbox = null, maxFeatures = 8000
     return apiPost('/simulate', data);
 }
 
+/**
+ * Get sample predictions with hardcoded examples
+ * @returns {Promise<Object>} - Sample prediction results
+ */
+async function getSamplePredictions() {
+    return apiGet('/predict-sample');
+}
+
 // Make functions globally accessible
 window.checkHealth = checkHealth;
 window.getPredictions = getPredictions;
 window.getBaseNetwork = getBaseNetwork;
 window.simulateVolume = simulateVolume;
+window.getSamplePredictions = getSamplePredictions;
