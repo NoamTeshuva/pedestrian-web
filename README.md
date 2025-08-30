@@ -38,13 +38,13 @@ This project consists of two services that run independently:
    ```
 
 3. **Activate virtual environment**:
+   - **Windows**:
+     ```bash
+     .\.venv\Scripts\activate
+     ```
    - **macOS/Linux**:
      ```bash
      source .venv/bin/activate
-     ```
-   - **Windows**:
-     ```bash
-     .venv\Scripts\activate
      ```
 
 4. **Install dependencies**:
@@ -108,6 +108,10 @@ The Flask backend provides the following endpoints:
     - `place` (required): City name (e.g., "Monaco", "Tel Aviv")
   - **Response**: GeoJSON with prediction data
 
+- **POST** `/predict-batch` - Batch prediction endpoint for CatBoost model
+  - **Request Body**: JSON with `{"items": [{"edge_id": 1, "betweenness": 0.3, "closeness": 0.1, "Hour": 8, "is_weekend": 0, "time_of_day": "morning", "land_use": "retail", "highway": "primary"}, ...]}` 
+  - **Response**: JSON with predictions and probabilities
+
 ### Network Data
 - **GET** `/base-network?place={city_name}` - Get base street network
 - **POST** `/simulate` - Simulate pedestrian volume with network modifications
@@ -123,8 +127,8 @@ curl "http://127.0.0.1:8000/health"
 # Get predictions
 curl "http://127.0.0.1:8000/predict?place=Monaco"
 
-# Test with bbox
-curl "http://127.0.0.1:8000/predict?place=Tel Aviv"
+# Batch prediction
+curl -X POST "http://127.0.0.1:8000/predict-batch" -H "Content-Type: application/json" --data-binary '{"items":[{"edge_id":1,"betweenness":0.3,"closeness":0.1,"Hour":8,"is_weekend":0,"time_of_day":"morning","land_use":"retail","highway":"primary"}]}'
 ```
 
 ## Environment Configuration
@@ -161,10 +165,40 @@ If ports 8000 or 3000 are in use:
 - **Backend**: Set `FLASK_PORT` environment variable
 - **Frontend**: Use a different port for your static server
 
+## Model and Feature Engineering
+
+This project now includes the complete ML pipeline from the legacy repository:
+
+### CatBoost Models
+- **cb_model.cbm** - Main pedestrian volume prediction model
+- **cb_model_four_city.cbm** - Four-city trained model
+- **cb_model_multi_city.cbm** - Multi-city trained model
+
+Models are stored in `api/models/` and tracked with Git LFS.
+
+### Feature Engineering Pipeline
+The `api/feature_engineering/` module provides:
+- **feature_pipeline.py** - Unified feature extraction pipeline
+- **centrality_features.py** - Network centrality calculations
+- **highway_features.py** - Road type and highway features  
+- **landuse_features.py** - Land use and urban context features
+- **time_features.py** - Temporal features (hour, weekend, time of day)
+
+### OSM Network Integration
+- **osm_tiles.py** - OpenStreetMap network extraction utilities
+
+## API Architecture
+
+The Flask API integrates the full ML pipeline:
+- Real CatBoost model predictions for `/predict` endpoint
+- Batch inference through `/predict-batch` 
+- Network simulation capabilities via `/simulate`
+- Full feature engineering pipeline with geospatial data processing
+
 ## Next Steps
 
-- [ ] Integrate full ML pipeline from legacy `app.py`
 - [ ] Add authentication if needed
 - [ ] Implement caching for better performance
-- [ ] Add comprehensive error handling
+- [ ] Add comprehensive error handling  
 - [ ] Write unit tests
+- [ ] Add monitoring and logging
