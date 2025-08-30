@@ -2,7 +2,7 @@
 
 class PedestrianPredictionApp {
     constructor() {
-        this.API_BASE_URL = 'http://127.0.0.1:5000';
+        this.API_BASE_URL = window.API_BASE_URL || 'http://127.0.0.1:8000';
         this.map = null;
         this.currentLayer = null;
         
@@ -125,34 +125,8 @@ class PedestrianPredictionApp {
     }
     
     async fetchPredictions(city) {
-        const params = new URLSearchParams({
-            place: city
-        });
-        
         try {
-            const response = await fetch(`${this.API_BASE_URL}/predict?${params.toString()}`, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                },
-            });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('Response error:', errorText);
-                
-                if (response.status === 404) {
-                    throw new Error('העיר לא נמצאה. אנא בדוק את השם ונסה שוב');
-                } else if (response.status === 500) {
-                    throw new Error('שגיאה בשרת. אנא נסה שוב מאוחר יותר');
-                } else if (response.status === 503) {
-                    throw new Error('השירות אינו זמין כרגע');
-                } else {
-                    throw new Error(`שגיאת HTTP ${response.status}: ${response.statusText}`);
-                }
-            }
-            
-            const data = await response.json();
+            const data = await window.getPredictions(city);
             console.log('Received data:', data);
             
             // בדוק אם יש geojson בתשובה
@@ -163,9 +137,7 @@ class PedestrianPredictionApp {
             return data;
             
         } catch (error) {
-            if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                throw new Error('לא ניתן להתחבר לשרת. ודא שהשרת רץ על http://127.0.0.1:5000');
-            }
+            // Error handling is now done in the API client
             throw error;
         }
     }

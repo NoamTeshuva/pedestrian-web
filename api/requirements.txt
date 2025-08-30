@@ -1,0 +1,12 @@
+# Core Flask dependencies
+flask>=2.3.0
+flask-cors>=4.0.0
+
+# Add more dependencies as needed for full integration:
+# pandas>=1.5.0
+# geopandas>=0.14.0
+# catboost>=1.2.0
+# networkx>=3.0
+# shapely>=2.0.0
+# numpy>=1.24.0
+# osmnx>=1.6.0
