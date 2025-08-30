@@ -112,6 +112,9 @@ The Flask backend provides the following endpoints:
   - **Request Body**: JSON with `{"items": [{"edge_id": 1, "betweenness": 0.3, "closeness": 0.1, "Hour": 8, "is_weekend": 0, "time_of_day": "morning", "land_use": "retail", "highway": "primary"}, ...]}` 
   - **Response**: JSON with predictions and probabilities
 
+- **GET** `/predict-sample` - Quick demo endpoint with hardcoded examples
+  - **Response**: JSON with sample predictions for 2 street segments
+
 ### Network Data
 - **GET** `/base-network?place={city_name}` - Get base street network
 - **POST** `/simulate` - Simulate pedestrian volume with network modifications
@@ -129,6 +132,9 @@ curl "http://127.0.0.1:8000/predict?place=Monaco"
 
 # Batch prediction
 curl -X POST "http://127.0.0.1:8000/predict-batch" -H "Content-Type: application/json" --data-binary '{"items":[{"edge_id":1,"betweenness":0.3,"closeness":0.1,"Hour":8,"is_weekend":0,"time_of_day":"morning","land_use":"retail","highway":"primary"}]}'
+
+# Quick sample prediction (no JSON required)
+curl "http://127.0.0.1:8000/predict-sample"
 ```
 
 ## Environment Configuration
