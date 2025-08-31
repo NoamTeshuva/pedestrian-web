@@ -1,5 +1,39 @@
-.claude/
-.idea/
-*.pyc
-__pycache__/
+# Python
 .venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.log
+
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# Local env (don't commit)
+frontend/.env.local
+
+# Big geospatial outputs (derived)
+*.gpkg
+*.geojson
+*.shp
+*.shx
+*.dbf
+*.cpg
+*.prj
+*.parquet
+*.tif
+*.tiff
+*.img
+*.vrt
+*.pbf
+api/cache/
+api/temp/
+exports/
+
+# OS/IDE
+.DS_Store
+.vscode/
+.idea/
+*.iml
