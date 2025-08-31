@@ -1,10 +1,10 @@
 services:
   - type: web
+    runtime: python
     name: pedestrian-api
-    env: python
     rootDir: api
     plan: starter
-    autoDeploy: true
+    autoDeployTrigger: commit
     buildCommand: |
       apt-get update && apt-get install -y git-lfs || true
       git lfs install || true
@@ -24,8 +24,9 @@ services:
       - key: CORS_ORIGINS
         value: https://pedestrian-frontend.onrender.com,http://localhost:3000
 
-  - type: static
+  - type: web
+    runtime: static
     name: pedestrian-frontend
     rootDir: frontend
     buildCommand: ""
-    publishPath: .
+    staticPublishPath: .
