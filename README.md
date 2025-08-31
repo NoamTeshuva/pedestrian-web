@@ -6,53 +6,64 @@ A standalone web application for predicting pedestrian volume with an interactiv
 
 ```
 /
-├── api/                    # Flask backend API
-│   ├── app.py             # Main Flask application
-│   └── requirements.txt   # Python dependencies
-├── frontend/              # Web frontend
-│   ├── index.html         # Main HTML page
-│   ├── script.js          # Frontend application logic
-│   ├── styles.css         # Styling
-│   ├── lib/
-│   │   └── api.js         # API client library
-│   └── .env.local         # Environment configuration
-└── README.md
+├── api/                         # Flask backend API
+│   ├── app.py                  # Main Flask application
+│   ├── requirements.txt        # Python dependencies
+│   ├── osm_tiles.py           # OpenStreetMap data utilities
+│   ├── __init__.py            # Package marker
+│   ├── feature_engineering/    # ML feature processing
+│   └── models/                # CatBoost models (Git LFS)
+│       └── *.cbm             
+├── frontend/                   # Web frontend
+│   ├── index.html            # Main HTML page
+│   ├── script.js             # Frontend application logic
+│   ├── styles.css            # Styling
+│   └── lib/
+│       └── api.js            # API client library
+├── .gitignore                 # Git ignore rules
+├── .gitattributes            # Git LFS configuration
+└── README.md                 # This file
 ```
+
+## Quick Start
+
+Run these two commands in separate terminals:
+
+**Backend:**
+```bash
+cd api && python -m venv .venv && .\.venv\Scripts\Activate.ps1 && pip install -r requirements.txt && python app.py
+```
+
+**Frontend:**
+```bash
+cd frontend && python -m http.server 3000 --bind 127.0.0.1
+```
+
+Then open `http://localhost:3000` in your browser.
 
 ## Local Development
 
 This project consists of two services that run independently:
 - **Backend**: Flask API server on port 8000
-- **Frontend**: Static web files served locally
+- **Frontend**: Static web files served locally on port 3000
+
+### Prerequisites
+
+- Python 3.8+ 
+- Git LFS (for model files): `git lfs install`
 
 ### Backend Setup
 
-1. **Navigate to API directory**:
+1. **Navigate to API directory and set up environment**:
    ```bash
    cd api
-   ```
-
-2. **Create virtual environment**:
-   ```bash
    python -m venv .venv
-   ```
-
-3. **Activate virtual environment**:
-   - **Windows**:
-     ```bash
-     .\.venv\Scripts\activate
-     ```
-   - **macOS/Linux**:
-     ```bash
-     source .venv/bin/activate
-     ```
-
-4. **Install dependencies**:
-   ```bash
+   .\.venv\Scripts\Activate.ps1  # Windows PowerShell
+   # OR: source .venv/bin/activate  # macOS/Linux
    pip install -r requirements.txt
    ```
 
-5. **Run the Flask server**:
+2. **Run the Flask server**:
    ```bash
    python app.py
    ```
@@ -67,32 +78,11 @@ This project consists of two services that run independently:
    ```
 
 2. **Serve the frontend files**:
-   
-   You can use any static file server. Here are a few options:
-
-   **Option A: Python HTTP server**:
    ```bash
-   # Python 3
-   python -m http.server 3000
-   
-   # Python 2
-   python -m SimpleHTTPServer 3000
+   python -m http.server 3000 --bind 127.0.0.1
    ```
 
-   **Option B: Node.js http-server**:
-   ```bash
-   # Install globally (one time)
-   npm install -g http-server
-   
-   # Serve files
-   http-server -p 3000 -c-1
-   ```
-
-   **Option C: Live Server (VS Code extension)**:
-   - Install the "Live Server" extension in VS Code
-   - Right-click on `index.html` and select "Open with Live Server"
-
-   The frontend will be available at `http://localhost:3000` (or whatever port you chose)
+   The frontend will be available at `http://localhost:3000`
 
 ## API Endpoints
 
@@ -176,7 +166,8 @@ If ports 8000 or 3000 are in use:
 This project now includes the complete ML pipeline from the legacy repository:
 
 ### CatBoost Models
-- **cb_model.cbm** - Main pedestrian volume prediction model
+- **cb_loco_train_dublin_melbourne_nyc_test_zurich.cbm** - Current active model (LOCO trained on Dublin, Melbourne, NYC, tested on Zurich)
+- **cb_model.cbm** - Original pedestrian volume prediction model
 - **cb_model_four_city.cbm** - Four-city trained model
 - **cb_model_multi_city.cbm** - Multi-city trained model
 

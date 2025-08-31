@@ -22,11 +22,13 @@ except Exception:
         # compact, UTF-8 JSON bytes (approximate orjson defaults)
         return _json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_file, after_this_request
 from flask_cors import CORS
+import tempfile
 import pandas as pd
 import logging
 import time
+import datetime as dt
 from datetime import datetime
 from typing import Optional, Tuple
 from catboost import CatBoostClassifier, Pool
@@ -37,6 +39,11 @@ import networkx as nx
 import geopandas as gpd
 from shapely.geometry import LineString, Point
 from shapely.ops import unary_union
+from shapely.validation import make_valid
+from shapely.geometry import shape
+import sqlite3
+import textwrap
+import re
 
 # Import the unified feature pipeline
 from feature_engineering.feature_pipeline import (
@@ -141,6 +148,162 @@ CORS(app, resources={
 def json_response(obj, status: int = 200) -> Response:
     return Response(fast_dumps(obj), status=status, mimetype="application/json")
 
+# GPKG Export Helper Functions
+def _slug(text: str) -> str:
+    """Convert text to URL-safe slug."""
+    import re
+    text = str(text).lower()
+    text = re.sub(r'[^a-z0-9\s-]', '', text)
+    text = re.sub(r'\s+', '-', text)
+    return text.strip('-')
+
+def _proba_columns(proba, start_label: int = 1):
+    """Generate probability columns with proper naming and proba_top."""
+    if not proba:
+        return {}
+    cols = {f"proba_{i}": float(p) for i, p in enumerate(proba, start=start_label)}
+    try:
+        cols["proba_top"] = float(max(proba))
+    except Exception:
+        pass
+    return cols
+
+def _items_to_geoms(items: list, place: str = None) -> gpd.GeoDataFrame:
+    """Convert prediction items to geometries using OSM network."""
+    if not items:
+        return gpd.GeoDataFrame()
+    
+    # Extract edge_ids from items
+    edge_ids = [item.get('edge_id') for item in items if item.get('edge_id')]
+    
+    if not edge_ids or not place:
+        # Create dummy point geometries if no place or edge_ids
+        geoms = [Point(0, 0) for _ in items]
+        return gpd.GeoDataFrame(items, geometry=geoms, crs=4326)
+    
+    try:
+        # Get network data for the place
+        network_gdf = edges_from_place(place, max_features=10000)
+        
+        # Filter to matching edge_ids
+        matching_edges = network_gdf[network_gdf['edge_id'].isin(edge_ids)]
+        
+        # Create result GeoDataFrame
+        result_data = []
+        for item in items:
+            edge_id = item.get('edge_id')
+            matching_row = matching_edges[matching_edges['edge_id'] == edge_id]
+            
+            if len(matching_row) > 0:
+                geom = matching_row.iloc[0].geometry
+                result_data.append({**item, 'geometry': geom})
+            else:
+                # Fallback to point geometry
+                result_data.append({**item, 'geometry': Point(0, 0)})
+        
+        return gpd.GeoDataFrame(result_data, crs=4326)
+        
+    except Exception as e:
+        logging.warning(f"Failed to get geometries for place {place}: {e}")
+        # Fallback to point geometries
+        geoms = [Point(0, 0) for _ in items]
+        return gpd.GeoDataFrame(items, geometry=geoms, crs=4326)
+
+def _items_to_geoms_list(items, place: str | None = None, bbox: str | None = None):
+    """
+    Turn items into shapely geometries list.
+    Priority:
+      1) item['geometry'] present (shapely or GeoJSON-like) -> use it
+      2) else, if available, map by edge_id from the base network
+    """
+    geoms = []
+    edge_geom_map = {}
+    
+    # Try to load base network for geometry mapping
+    try:
+        edges_gdf = edges_from_place(place) if place else None
+        if edges_gdf is not None and not edges_gdf.empty:
+            if getattr(edges_gdf, "crs", None) and str(edges_gdf.crs).upper() != "EPSG:4326":
+                edges_gdf = edges_gdf.to_crs("EPSG:4326")
+            id_col = "edge_id" if "edge_id" in edges_gdf.columns else None
+            if id_col:
+                edge_geom_map = dict(zip(edges_gdf[id_col], edges_gdf.geometry))
+    except Exception:
+        pass
+
+    for it in items:
+        g = it.get("geometry")
+        if g is not None:
+            # already shapely?
+            if hasattr(g, "geom_type"):
+                geoms.append(g)
+            else:
+                try:
+                    geoms.append(shape(g))
+                except Exception:
+                    geoms.append(None)
+        else:
+            eid = it.get("edge_id")
+            geoms.append(edge_geom_map.get(eid))
+    return geoms
+
+def _build_predictions_gdf_new(items, out, place: str | None = None, bbox: str | None = None, crs_epsg: int = 4326):
+    """Build predictions GeoDataFrame with proper field structure."""
+    preds = out.get("predictions", [])
+    geoms = _items_to_geoms_list(items, place=place, bbox=bbox)
+
+    rows = []
+    for p in preds:
+        base = {
+            "edge_id": p.get("edge_id"),
+            "volume_class": p.get("volume_class"),  # expected 1..5
+        }
+        base.update(_proba_columns(p.get("proba"), start_label=1))
+        feats = p.get("features") or {}
+        for k in ["Hour","betweenness","closeness","is_weekend","time_of_day","land_use","highway"]:
+            if k in feats:
+                base[k] = feats[k]
+        # force strings for categorical fields
+        for k in ("time_of_day","land_use","highway"):
+            if k in base and base[k] is not None:
+                base[k] = str(base[k])
+        rows.append(base)
+
+    gdf = gpd.GeoDataFrame(rows, geometry=geoms, crs=f"EPSG:{crs_epsg}")
+    gdf = gdf[~gdf.geometry.isna()].copy()
+    if gdf.empty:
+        return gdf
+
+    # fix invalid geometries for QGIS
+    try:
+        gdf.geometry = gdf.geometry.apply(make_valid)
+    except Exception:
+        gdf.geometry = gdf.buffer(0)
+    return gdf
+
+def _build_predictions_gdf(predictions: dict, place: str = None) -> gpd.GeoDataFrame:
+    """Build GeoDataFrame from prediction results."""
+    items = predictions.get('predictions', [])
+    if not items:
+        return gpd.GeoDataFrame()
+    
+    # Convert items to geometries
+    gdf = _items_to_geoms(items, place)
+    
+    # Add probability columns
+    if items and 'proba' in items[0]:
+        num_classes = len(items[0]['proba'])
+        proba_cols = _proba_columns(num_classes)
+        
+        for i, col in enumerate(proba_cols):
+            gdf[col] = [item.get('proba', [0] * num_classes)[i] for item in items]
+    
+    # Ensure required columns exist
+    if 'volume_class' not in gdf.columns:
+        gdf['volume_class'] = [item.get('volume_class', 0) for item in items]
+    
+    return gdf
+
 def clean_geojson(geojson_dict):
     """Clean GeoJSON by replacing NaN values with null."""
     import json
@@ -158,10 +321,93 @@ def clean_geojson(geojson_dict):
     
     return clean_value(geojson_dict)
 
-# Load the pre-trained CatBoost model
+# QGIS styling helper functions
+def _gpkg_geom_column(gpkg_path: str, table: str) -> str:
+    """Get the geometry column name for a table in the GPKG."""
+    conn = sqlite3.connect(gpkg_path)
+    try:
+        cur = conn.execute("SELECT column_name FROM gpkg_geometry_columns WHERE table_name = ?", (table,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] else "geom"
+    finally:
+        conn.close()
+
+def _ensure_qgis_layer_styles(conn: sqlite3.Connection):
+    """Ensure the layer_styles table exists in the GPKG for QGIS styling."""
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS layer_styles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      f_table_catalog TEXT,
+      f_table_schema TEXT,
+      f_table_name TEXT,
+      f_geometry_column TEXT,
+      styleName TEXT,
+      styleQML TEXT,
+      styleSLD TEXT,
+      useAsDefault INTEGER,
+      description TEXT,
+      owner TEXT,
+      ui BLOB,
+      update_time TEXT
+    );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_layer_styles_table ON layer_styles(f_table_name);")
+
+def _install_qgis_style(gpkg_path: str, table: str, qml_xml: str, style_name: str = "default", use_default: int = 1):
+    """Install a QGIS style into the GPKG layer_styles table."""
+    geom_col = _gpkg_geom_column(gpkg_path, table)
+    conn = sqlite3.connect(gpkg_path)
+    try:
+        _ensure_qgis_layer_styles(conn)
+        conn.execute("UPDATE layer_styles SET useAsDefault=0 WHERE f_table_name=?;", (table,))
+        conn.execute("""
+            INSERT INTO layer_styles
+            (f_table_catalog, f_table_schema, f_table_name, f_geometry_column,
+             styleName, styleQML, styleSLD, useAsDefault, description, owner, ui, update_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+        """, ("", "", table, geom_col, style_name, qml_xml, None, use_default, "auto-installed by API", "api", None))
+        conn.commit()
+    finally:
+        conn.close()
+
+def _qml_predictions_categorized() -> str:
+    """Generate QML style for categorized volume_class with graduated line widths."""
+    categories = [
+        ("1", "1 - Very Low", "#4c78a8", "0.40"),
+        ("2", "2 - Low",      "#72b7b2", "0.70"),
+        ("3", "3 - Medium",   "#e6b8a2", "1.10"),
+        ("4", "4 - High",     "#f58518", "1.60"),
+        ("5", "5 - Very High","#e45756", "2.20"),
+    ]
+    cats_xml, syms_xml = [], []
+    for i,(val,label,color,width) in enumerate(categories):
+        cats_xml.append(f'<category symbol="{i}" value="{val}" label="{label}"/>')
+        syms_xml.append(textwrap.dedent(f"""
+        <symbol name="{i}" type="line" alpha="1">
+          <layer class="SimpleLine" enabled="1" pass="0" locked="0">
+            <prop k="capstyle" v="round"/>
+            <prop k="joinstyle" v="round"/>
+            <prop k="line_color" v="{color}"/>
+            <prop k="line_style" v="solid"/>
+            <prop k="line_width" v="{width}"/>
+            <prop k="line_width_unit" v="MM"/>
+          </layer>
+        </symbol>
+        """).strip())
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<qgis version="3" styleCategories="Symbology">
+  <renderer-v2 type="categorizedSymbol" attr="volume_class" symbollevels="0" enableorderby="0" forceraster="0">
+    <categories>{' '.join(cats_xml)}</categories>
+    <symbols>{' '.join(syms_xml)}</symbols>
+  </renderer-v2>
+  <layerGeometryType>1</layerGeometryType>
+</qgis>
+"""
+
+# Load the pre-trained CatBoost model (cb-loco model trained on Dublin, Melbourne, NYC, tested on Zurich)
 MODEL_PATH = os.getenv(
     "MODEL_PATH", 
-    os.path.join(os.path.dirname(__file__), "models", "cb_model.cbm")
+    os.path.join(os.path.dirname(__file__), "models", "cb_loco_train_dublin_melbourne_nyc_test_zurich.cbm")
 )
 
 try:
@@ -673,41 +919,6 @@ def predict_batch():
         logging.error(f"Batch prediction error: {e}")
         return jsonify({"error": str(e)}), 400
 
-@app.route("/predict-sample", methods=["GET"])
-def predict_sample():
-    """Sample prediction endpoint with hardcoded examples for quick demo."""
-    if model is None:
-        return jsonify({"error": "Model not loaded"}), 503
-        
-    items = [
-        {
-            "edge_id": 1,
-            "betweenness": 0.3,
-            "closeness": 0.1,
-            "Hour": 8,
-            "is_weekend": 0,
-            "time_of_day": "morning",
-            "land_use": "retail",
-            "highway": "primary"
-        },
-        {
-            "edge_id": 2,
-            "betweenness": 0.02,
-            "closeness": 0.01,
-            "Hour": 19,
-            "is_weekend": 1,
-            "time_of_day": "evening",
-            "land_use": "residential",
-            "highway": "residential"
-        }
-    ]
-    
-    try:
-        out = predict_with_model(items)
-        return jsonify(out), 200
-    except Exception as e:
-        logging.error(f"Sample prediction error: {e}")
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/predict", methods=["GET"])
 def predict():
@@ -794,6 +1005,248 @@ def predict():
         return jsonify({
             "error": "Internal server error",
             "code": 500,
+            "details": str(e)
+        }), 500
+
+
+@app.route("/predict-gpkg", methods=["GET"])
+def predict_gpkg():
+    """Get pedestrian volume predictions as downloadable GPKG file - predictions only.
+    
+    Query Parameters:
+        place (str): Place name (e.g., "Monaco", "Tel Aviv") - required
+        bbox (str, optional): Bounding box as "minx,miny,maxx,maxy"
+        date (str, optional): ISO timestamp (defaults to current time)
+        
+    Returns:
+        GPKG file download with single 'predictions' layer and embedded QGIS styling
+    """
+    place = request.args.get("place")
+    bbox_str = request.args.get("bbox")
+    date = request.args.get("date")
+    
+    if not place:
+        return jsonify({"error": "Missing 'place' parameter"}), 400
+
+    try:
+        # Validate and parse parameters
+        place, bbox, date = validate_request_params(place, bbox_str, date)
+        
+        logging.info(f"GPKG prediction request for place={place}, bbox={bbox}, date={date}")
+        
+        # Check if model is loaded
+        if model is None:
+            return jsonify({
+                "error": "Model not available",
+                "code": 503,
+                "details": "CatBoost model failed to load at startup"
+            }), 503
+        
+        # Run feature extraction pipeline
+        features_gdf, pipeline_metadata = run_feature_pipeline(
+            place=place,
+            bbox=bbox,
+            timestamp=date
+        )
+        
+        # Prepare features for model
+        model_features = prepare_model_features(features_gdf)
+        
+        # Make predictions
+        logging.info(f"Making predictions for {len(model_features)} edges")
+        
+        # Get categorical feature indices
+        cat_feature_indices = [model_features.columns.get_loc(col) for col in CAT_COLS if col in model_features.columns]
+        
+        # Ensure categorical features are strings
+        for col in CAT_COLS:
+            if col in model_features.columns:
+                model_features[col] = model_features[col].astype(str)
+        
+        # Create CatBoost Pool and predict
+        pool = Pool(model_features, cat_features=cat_feature_indices)
+        predictions = model.predict(pool)
+        probabilities = model.predict_proba(pool)
+        
+        # Create predictions-only GeoDataFrame with proper field structure
+        preds_gdf = features_gdf.copy()
+        preds_gdf['volume_class'] = predictions.astype(int)
+        
+        # Add probability columns in the expected format (proba_1, proba_2, etc.)
+        if probabilities.ndim > 1:
+            for i in range(probabilities.shape[1]):
+                preds_gdf[f'proba_{i+1}'] = probabilities[:, i]
+            preds_gdf['proba_top'] = probabilities.max(axis=1)
+        else:
+            preds_gdf['proba_1'] = probabilities
+            preds_gdf['proba_top'] = probabilities
+        
+        # Add model metadata if available
+        try:
+            preds_gdf["model_name"] = CURRENT_MODEL_NAME if 'CURRENT_MODEL_NAME' in globals() else "catboost_model"
+            if 'MODEL_PATH' in globals():
+                import hashlib
+                with open(MODEL_PATH, 'rb') as f:
+                    model_sha = hashlib.sha256(f.read()).hexdigest()[:16]
+                preds_gdf["model_sha"] = model_sha
+        except Exception:
+            pass
+        
+        # Ensure EPSG:4326 CRS
+        if preds_gdf.crs is None or str(preds_gdf.crs).upper() != "EPSG:4326":
+            try:
+                preds_gdf = preds_gdf.to_crs("EPSG:4326")
+            except Exception:
+                pass
+        
+        # Fix invalid geometries for QGIS
+        try:
+            preds_gdf.geometry = preds_gdf.geometry.apply(make_valid)
+        except Exception:
+            preds_gdf.geometry = preds_gdf.buffer(0)
+        
+        # Drop rows without geometry
+        preds_gdf = preds_gdf[~preds_gdf.geometry.isna()].copy()
+        if preds_gdf.empty:
+            return jsonify({"error": "No features/geometry to export"}), 400
+
+        # Windows-safe temp file
+        fd, tmp_path = tempfile.mkstemp(suffix=".gpkg")
+        os.close(fd)
+
+        try:
+            # Write single predictions layer
+            preds_gdf.to_file(tmp_path, driver="GPKG", layer="predictions")
+        except Exception:
+            try:
+                from pyogrio import write_dataframe
+                write_dataframe(preds_gdf, tmp_path, driver="GPKG", layer="predictions")
+            except Exception as e:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+                return jsonify({"error": f"Failed to write GPKG: {str(e)}"}), 500
+
+        # Embed QGIS style (predictions only)
+        try:
+            _install_qgis_style(tmp_path, "predictions", _qml_predictions_categorized(),
+                                style_name="predictions_default", use_default=1)
+        except Exception as e:
+            logging.warning(f"Could not install predictions style: {e}")
+
+        # Generate filename
+        ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"predictions_{_slug(place)}_{ts}.gpkg"
+
+        @after_this_request
+        def _cleanup(resp):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+            return resp
+
+        logging.info(f"GPKG file created with {len(preds_gdf)} predictions for {place}")
+
+        return send_file(
+            tmp_path,
+            mimetype="application/geopackage+sqlite3",
+            as_attachment=True,
+            download_name=fname,
+            max_age=0,
+            conditional=True,
+        )
+
+    except Exception as e:
+        logging.exception("predict-gpkg failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/predict-batch-gpkg", methods=["POST"])
+def predict_batch_gpkg():
+    """Batch prediction endpoint that returns GPKG file.
+    
+    Request Body:
+        {
+            "items": [
+                {
+                    "edge_id": 1,
+                    "betweenness": 0.3,
+                    "closeness": 0.1,
+                    "Hour": 8,
+                    "is_weekend": 0,
+                    "time_of_day": "morning",
+                    "land_use": "retail",
+                    "highway": "primary"
+                },
+                ...
+            ],
+            "place": "Monaco"  # Optional, for better geometries
+        }
+        
+    Returns:
+        GPKG file download with batch predictions and geometries
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        items = payload.get("items", [])
+        place = payload.get("place")
+        
+        if not items:
+            return jsonify({"error": "Provide JSON with 'items': [...]"}), 400
+        
+        if model is None:
+            return jsonify({"error": "Model not loaded"}), 503
+        
+        logging.info(f"GPKG batch prediction request for {len(items)} items, place={place}")
+        
+        # Get predictions using existing function
+        predictions = predict_with_model(items)
+        
+        # Build GeoDataFrame with geometries
+        gdf = _build_predictions_gdf(predictions, place)
+        
+        if gdf.empty:
+            return jsonify({"error": "No valid predictions generated"}), 400
+        
+        # Create temporary GPKG file
+        import os
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix='.gpkg')
+        
+        try:
+            # Close the file descriptor to allow geopandas to write
+            os.close(tmp_fd)
+            
+            # Write the GPKG file
+            gdf.to_file(tmp_path, driver='GPKG')
+            
+            # Generate filename
+            place_slug = _slug(place) if place else "batch"
+            filename = f"pedestrian_predictions_batch_{place_slug}.gpkg"
+            
+            logging.info(f"GPKG batch file created with {len(gdf)} predictions")
+            
+            # Send the file
+            return send_file(
+                tmp_path,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/geopackage+sqlite3'
+            )
+            
+        except Exception as e:
+            # Clean up on error
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise e
+            
+    except Exception as e:
+        logging.error(f"Batch GPKG prediction error: {str(e)}", exc_info=True)
+        return jsonify({
+            "error": "Internal server error",
             "details": str(e)
         }), 500
 
