@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>חיזוי נפח הולכי רגל</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin=""/>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>חיזוי נפח הולכי רגל</h1>
+            <p>הזן שם עיר וקבל תחזית לנפח הולכי רגל ברחובות</p>
+        </header>
+
+        <div class="search-container">
+            <form id="searchForm" class="search-form">
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="cityInput" 
+                        placeholder="הזן שם עיר (לדוגמה: Monaco, Tel Aviv, Jerusalem)"
+                        required
+                        dir="ltr"
+                    >
+                    <button type="submit" id="searchBtn">
+                        <span id="buttonText">חיפוש</span>
+                        <span id="loadingSpinner" class="spinner hidden">⏳</span>
+                    </button>
+                    <button type="button" id="downloadGpkgBtn" class="download-gpkg-btn hidden">
+                        <span id="downloadBtnText">הורד GPKG מלא (חיזוי בלבד)</span>
+                        <span id="downloadLoadingSpinner" class="spinner hidden">⏳</span>
+                    </button>
+                </div>
+
+                <!-- New search parameters section -->
+                <div class="search-parameters">
+                    <h4>פרמטרי חיפוש</h4>
+                    <div class="parameters-grid">
+                        <div class="parameter-group">
+                            <label for="seasonSelect">עונה:</label>
+                            <select id="seasonSelect" class="parameter-input">
+                                <option value="winter">חורף</option>
+                                <option value="spring">אביב</option>
+                                <option value="summer">קיץ</option>
+                                <option value="autumn">סתיו</option>
+                            </select>
+                        </div>
+
+                        <div class="parameter-group">
+                            <label for="weekTypeSelect">זמן בשבוע:</label>
+                            <select id="weekTypeSelect" class="parameter-input">
+                                <option value="weekday">אמצע שבוע</option>
+                                <option value="weekend">סוף שבוע</option>
+                            </select>
+                        </div>
+
+                        <div class="parameter-group">
+                            <label for="timeOfDaySelect">זמן ביום:</label>
+                            <select id="timeOfDaySelect" class="parameter-input">
+                                <option value="morning">בוקר (6-12)</option>
+                                <option value="afternoon">צהריים (12-18)</option>
+                                <option value="evening">ערב (18-22)</option>
+                                <option value="night">לילה (22-6)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div id="statusMessage" class="status-message hidden"></div>
+
+        <div class="results-container">
+            <div id="mapContainer" class="map-container">
+                <div class="map-header">
+                    <h3 id="mapTitle">מפת רחובות</h3>
+                    <div id="loadingMessage" class="loading-message hidden">טוען נתונים...</div>
+                    <div id="mapStats" class="map-stats"></div>
+                </div>
+                <div id="map" class="map"></div>
+                <div class="legend">
+                    <h4>מקרא:</h4>
+                    <div id="legendItems"></div>
+                </div>
+            </div>
+            
+            <div id="detailsContainer" class="details-container hidden">
+                <h3>פרטי תחזית</h3>
+                <div id="predictionDetails" class="prediction-details"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" 
+            crossorigin=""></script>
+    
+    <!-- API base resolver: use localStorage override, ?api= param, or default to Render URL -->
+    <script>
+    (function(){
+      const url = new URL(window.location.href);
+      const fromQuery = url.searchParams.get('api');
+      if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
+
+      window.API_BASE =
+        localStorage.getItem('API_BASE') ||
+        "https://pedestrian-api.onrender.com"; /* TODO: after first deploy, replace with your actual API URL from Render */
+    })();
+    </script>
+    
+    <!-- Custom JavaScript -->
+    <script src="script.js"></script>
+</body>
+</html>
