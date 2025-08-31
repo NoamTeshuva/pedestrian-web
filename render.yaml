@@ -1,32 +1,36 @@
 services:
+  # =========================
+  # Backend API (Flask, Free)
+  # =========================
   - type: web
+    name: pedestrian-api-web          # unique name so it won't attach to the old service
     runtime: python
-    name: pedestrian-api
     rootDir: api
-    plan: starter
-    autoDeployTrigger: commit
+    plan: free                        # no payment required
+    autoDeploy: true
+    healthCheckPath: /health
     buildCommand: |
-      apt-get update && apt-get install -y git-lfs || true
-      git lfs install || true
-      git lfs pull || true
+      set -e
       pip install --upgrade pip
       pip install -r requirements.txt
+      (git lfs install && git lfs pull) || true
     startCommand: gunicorn app:app -b 0.0.0.0:$PORT --timeout 180
-    disk:
-      name: data
-      mountPath: /var/data
-      sizeGB: 20
+    # Free plan has no persistent disk; write temp exports to /tmp
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: DATA_DIR
-        value: /var/data
+        value: /tmp
       - key: CORS_ORIGINS
-        value: https://pedestrian-frontend.onrender.com,http://localhost:3000
+        # after first deploy, replace with your actual frontend URL shown by Render
+        value: https://pedestrian-frontend-web.onrender.com,http://localhost:3000
 
+  # =========================
+  # Frontend (Static, Free)
+  # =========================
   - type: web
+    name: pedestrian-frontend-web     # unique name
     runtime: static
-    name: pedestrian-frontend
     rootDir: frontend
-    buildCommand: ""
     staticPublishPath: .
+    autoDeploy: true
