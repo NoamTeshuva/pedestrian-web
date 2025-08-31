@@ -86,6 +86,6 @@ cache/
 *.log
 logs/
 
-# Large files that should use Git LFS
-*.cbm
-*.pkl
+# Large files that should use Git LFS (tracked via LFS, not ignored)
+# *.cbm - tracked via Git LFS in .gitattributes
+# *.pkl - tracked via Git LFS in .gitattributes
