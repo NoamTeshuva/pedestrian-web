@@ -128,13 +128,14 @@ app = Flask(__name__)
 
 # CORS: read from env var (comma-separated)
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
-CORS(app, resources={
-    r"/*": {
-        "origins": [o.strip() for o in ALLOWED_ORIGINS if o.strip()],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
+# CORS(app, resources={
+#     r"/*": {
+#         "origins": [o.strip() for o in ALLOWED_ORIGINS if o.strip()],
+#         "methods": ["GET", "POST", "OPTIONS"],
+#         "allow_headers": ["Content-Type"]
+#     }
+# })
+CORS(app)  # Allow all origins for simplicity; adjust as needed
 
 # Where to write temporary/export files (Render free plan uses /tmp)
 DATA_DIR = os.environ.get("DATA_DIR", "/tmp")
@@ -1113,7 +1114,23 @@ def predict():
         # Create CatBoost Pool and predict
         pool = Pool(model_features, cat_features=cat_feature_indices)
         predictions = model.predict(pool)
+
+        # לחשב גם הסתברויות (כמו ב-/predict-gpkg)
+        probabilities = model.predict_proba(pool)
+
+        # הזרקת עמודות הסתברות ל-GeoDataFrame לפני ההחזרה
+        import numpy as np
+        if hasattr(probabilities, "ndim") and probabilities.ndim > 1:
+            for i in range(probabilities.shape[1]):
+                features_gdf[f'proba_{i+1}'] = probabilities[:, i]
+                features_gdf['proba_top'] = probabilities.max(axis=1)
+        else:
+            # מקרה קצה של מחלקה יחידה
+            features_gdf['proba_1'] = probabilities
+            features_gdf['proba_top'] = probabilities
+
         
+
         # 8. Create response
         total_time = time.time() - request_start
         pipeline_metadata["total_request_time"] = total_time
