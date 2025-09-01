@@ -128,13 +128,6 @@ app = Flask(__name__)
 
 # CORS: read from env var (comma-separated)
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
-# CORS(app, resources={r"/*": {"origins": [o.strip() for o in ALLOWED_ORIGINS if o.strip()]}})
-CORS(app)
-
-# Where to write temporary/export files (Render persistent disk)
-DATA_DIR = os.environ.get("DATA_DIR", "/var/data")
-os.makedirs(DATA_DIR, exist_ok=True)
-
 CORS(app, resources={
     r"/*": {
         "origins": [o.strip() for o in ALLOWED_ORIGINS if o.strip()],
@@ -142,6 +135,10 @@ CORS(app, resources={
         "allow_headers": ["Content-Type"]
     }
 })
+
+# Where to write temporary/export files (Render free plan uses /tmp)
+DATA_DIR = os.environ.get("DATA_DIR", "/tmp")
+os.makedirs(DATA_DIR, exist_ok=True)
 
 def json_response(obj, status: int = 200) -> Response:
     return Response(fast_dumps(obj), status=status, mimetype="application/json")
