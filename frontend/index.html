@@ -105,7 +105,7 @@
             crossorigin=""></script>
     
     <!-- API base resolver: use localStorage override, ?api= param, or default to Render URL -->
-    <script>
+    <!-- <script>
     (function(){
       const url = new URL(window.location.href);
       const fromQuery = url.searchParams.get('api');
@@ -115,6 +115,27 @@
         localStorage.getItem('API_BASE') ||
         "https://pedestrian-api.onrender.com"; /* TODO: after first deploy, replace with your actual API URL from Render */
     })();
+    </script> -->
+    <script>
+        (function () {
+        const url = new URL(window.location.href);
+        const fromQuery = url.searchParams.get('api');
+        if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
+
+        const ls = localStorage.getItem('API_BASE');
+        const isLocal =
+            location.hostname === 'localhost' ||
+            location.hostname === '127.0.0.1';
+
+        // סדר עדיפויות:
+        // 1) ?api=...
+        // 2) localStorage
+        // 3) ברירת מחדל: לוקאל אם רץ לוקאלית, אחרת Render
+        window.API_BASE = ls ||
+            (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
+
+        console.log('[API_BASE]', window.API_BASE);
+        })();
     </script>
     
     <!-- Custom JavaScript -->

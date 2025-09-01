@@ -3,6 +3,7 @@
 class PedestrianPredictionApp {
     constructor() {
         this.API_BASE_URL = window.API_BASE || 'http://127.0.0.1:8000';
+        console.log('[PedestrianPredictionApp] Using API:', this.API_BASE_URL);
         this.map = null;
         this.currentLayer = null;
         
@@ -128,16 +129,6 @@ class PedestrianPredictionApp {
         if (this.downloadGpkgBtn) {
             this.downloadGpkgBtn.addEventListener('click', () => this.handleDownloadGpkg());
         }
-    }
-    
-    initializeMap() {
-        // Create map with default view (Israel as default)
-        this.map = L.map('map').setView([31.5, 35.0], 8);
-        
-        // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(this.map);
     }
     
     apply_week_type_to_datetime(dt, week_type) {
@@ -456,30 +447,42 @@ class PedestrianPredictionApp {
             legendContainer.appendChild(item);
         }
     }
-    
+
     bindFeaturePopup(feature, layer) {
         const props = feature.properties;
-        
+
         const popupContent = `
             <div style="direction: rtl; text-align: right;">
                 <h3>פרטי רחוב</h3>
 
-                <p><span style="color: ${this.getFeatureStyle(feature).color}; font-weight: bold;">נפח חזוי: ${props.volume_bin || 'N/A'}</span></p>
+                <p><span style="color: ${this.getFeatureStyle(feature).color}; font-weight: bold;">
+                    נפח חזוי: ${props.volume_bin ?? 'לא ידוע'}
+                </span></p>
+
                 <p><strong>סוג רחוב:</strong> ${this.translateHighway(props.highway) || 'לא ידוע'}</p>
                 <p><strong>שימוש קרקע:</strong> ${this.translateLandUse(props.land_use) || 'לא ידוע'}</p>
-                <p><strong>הסתברות התאמה לנפח נמוך:</strong> ${props.proba_1?.toFixed(5) || 'לא ידוע'}</p>
-                <p><strong>הסתברות התאמה לנפח בינוני-נמוך:</strong> ${props.proba_2?.toFixed(5) || 'לא ידוע'}</p>
-                <p><strong>הסתברות התאמה לנפח בינוני:</strong> ${props.proba_3?.toFixed(5) || 'לא ידוע'}</p>
-                <p><strong>הסתברות התאמה לנפח גבוה:</strong> ${props.proba_4?.toFixed(5) || 'לא ידוע'}</p>
-                <p><strong>הסתברות התאמה לנפח גבוה מאוד:</strong> ${props.proba_5?.toFixed(5) || 'לא ידוע'}</p>
-                <p><strong>Betweenness:</strong> ${props.betweenness || 'לא ידוע'}</p>
-                <p><strong>Closeness:</strong> ${props.closeness || 'לא ידוע'}</p>
+
+                <p><strong> 1) הסתברות התאמה לנפח נמוך:</strong> ${this.formatProb(props.proba_1)}</p>
+                <p><strong> 2) הסתברות התאמה לנפח בינוני-נמוך:</strong> ${this.formatProb(props.proba_2)}</p>
+                <p><strong> 3) הסתברות התאמה לנפח בינוני:</strong> ${this.formatProb(props.proba_3)}</p>
+                <p><strong> 4) הסתברות התאמה לנפח גבוה:</strong> ${this.formatProb(props.proba_4)}</p>
+                <p><strong> 5) הסתברות התאמה לנפח גבוה מאוד:</strong> ${this.formatProb(props.proba_5)}</p>
+
+                <p><strong>Betweenness:</strong> ${props.betweenness.toFixed(5) || 'לא ידוע'}</p>
+                <p><strong>Closeness:</strong> ${props.closeness.toFixed(5) || 'לא ידוע'}</p>
+
                 ${props.osmid ? `<p><strong>מזהה OSM:</strong> ${props.osmid}</p>` : ''}
             </div>
         `;
-        
+
         layer.bindPopup(popupContent);
     }
+
+    formatProb(val) {
+        const n = Number(val);
+        return Number.isFinite(n) ? n.toFixed(5) : 'לא ידוע';
+    }
+
     
     translateHighway(highway) {
         const translations = {
