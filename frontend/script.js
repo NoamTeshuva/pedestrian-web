@@ -453,7 +453,7 @@ class PedestrianPredictionApp {
 
         const popupContent = `
             <div style="direction: rtl; text-align: right;">
-                <h3>פרטי רחוב</h3>
+                <h3>פרטי רחוב - ${props.name || 'לא ידוע'}</h3>
 
                 <p><span style="color: ${this.getFeatureStyle(feature).color}; font-weight: bold;">
                     נפח חזוי: ${props.volume_bin ?? 'לא ידוע'}
