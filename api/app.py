@@ -540,7 +540,8 @@ def create_prediction_response(features_gdf, predictions, metadata, search_param
         "processing_time": round(float(metadata["processing_time"]), 2),
         "network_stats": make_json_serializable(metadata["network_stats"]),
         "sample_prediction": {
-            "volume_bin": int(predictions[0]) if len(predictions) > 0 else None,
+            # "volume_bin": int(predictions[0]) if len(predictions) > 0 else None,
+            "volume_bin": int(np.asarray(predictions).ravel()[0]) if len(predictions) > 0 else None,
             "features": sample_features
         },
         "validation": make_json_serializable(metadata["validation"]),
@@ -1176,33 +1177,64 @@ def predict_gpkg():
         
     Returns:
         GPKG file download with single 'predictions' layer and embedded QGIS styling
+
+        Get pedestrian volume predictions as downloadable GPKG file - predictions only.
+
+        Accepts either ?place=... or ?bbox=w,s,e,n (like /predict).
     """
+    # place = request.args.get("place")
+    # bbox_str = request.args.get("bbox")
+    # date = request.args.get("date")
+    
+    # if not place:
+    #     return jsonify({"error": "Missing 'place' parameter"}), 400
+
+    # try:
+    #     # Validate and parse parameters
+    #     place, bbox, date = validate_request_params(place, bbox_str, date)
+        
+    #     # Parse search parameters
+    #     search_params = parse_search_parameters(request.args)
+    #     target_datetime = search_params['datetime']
+        
+    #     logging.info(f"GPKG prediction request for place={place}, bbox={bbox}, target_datetime={target_datetime}")
+        
+    #     # Check if model is loaded
+    #     if model is None:
+    #         return jsonify({
+    #             "error": "Model not available",
+    #             "code": 503,
+    #             "details": "CatBoost model failed to load at startup"
+    #         }), 503
+        
+    #     # Run feature extraction pipeline
+    #     features_gdf, pipeline_metadata = run_feature_pipeline(
+    #         place=place,
+    #         bbox=bbox,
+    #         timestamp=target_datetime.isoformat()
+    #     )
+
     place = request.args.get("place")
     bbox_str = request.args.get("bbox")
     date = request.args.get("date")
-    
-    if not place:
-        return jsonify({"error": "Missing 'place' parameter"}), 400
 
     try:
-        # Validate and parse parameters
+        # בודק ש־place או bbox סופקו (לפחות אחד), ומאמת bbox אם קיים
+        # place, bbox, date = validate_request_params(place, bbox_str, date)
+         # Validate and parse parameters (מאפשר place או bbox)
         place, bbox, date = validate_request_params(place, bbox_str, date)
-        
-        # Parse search parameters
+
+        # Parse search parameters (שומר עונה/שבוע/יום)
         search_params = parse_search_parameters(request.args)
         target_datetime = search_params['datetime']
-        
+
         logging.info(f"GPKG prediction request for place={place}, bbox={bbox}, target_datetime={target_datetime}")
-        
-        # Check if model is loaded
+
         if model is None:
-            return jsonify({
-                "error": "Model not available",
-                "code": 503,
-                "details": "CatBoost model failed to load at startup"
-            }), 503
-        
-        # Run feature extraction pipeline
+            return jsonify({"error": "Model not available", "code": 503,
+                            "details": "CatBoost model failed to load at startup"}), 503
+
+        # Feature pipeline (תומך בשני המצבים: place או bbox)
         features_gdf, pipeline_metadata = run_feature_pipeline(
             place=place,
             bbox=bbox,
