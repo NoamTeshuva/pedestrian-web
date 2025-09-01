@@ -14,14 +14,15 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>חיזוי נפח הולכי רגל</h1>
-            <p>הזן שם עיר וקבל תחזית לנפח הולכי רגל ברחובות</p>
-        </header>
+    <!-- Full screen map -->
+    <div id="map" class="fullscreen-map"></div>
 
-        <div class="search-container">
-            <form id="searchForm" class="search-form">
+    <!-- Top search bar
+    <div class="top-search-bar">
+        <div class="search-bar-content">
+            <h1>חיזוי נפח הולכי רגל</h1>
+            
+            <form id="searchForm" class="search-form inline-form">
                 <div class="input-group">
                     <input 
                         type="text" 
@@ -34,88 +35,103 @@
                         <span id="buttonText">חיפוש</span>
                         <span id="loadingSpinner" class="spinner hidden">⏳</span>
                     </button>
-                    <button type="button" id="downloadGpkgBtn" class="download-gpkg-btn hidden">
-                        <span id="downloadBtnText">הורד GPKG מלא (חיזוי בלבד)</span>
-                        <span id="downloadLoadingSpinner" class="spinner hidden">⏳</span>
-                    </button>
                 </div>
 
-                <!-- New search parameters section -->
-                <div class="search-parameters">
-                    <h4>פרמטרי חיפוש</h4>
-                    <div class="parameters-grid">
-                        <div class="parameter-group">
-                            <label for="seasonSelect">עונה:</label>
-                            <select id="seasonSelect" class="parameter-input">
-                                <option value="winter">חורף</option>
-                                <option value="spring">אביב</option>
-                                <option value="summer">קיץ</option>
-                                <option value="autumn">סתיו</option>
-                            </select>
-                        </div>
+                <button type="button" class="parameters-toggle" id="parametersToggle">
+                    <span>⚙️ פרמטרים</span>
+                </button>
 
-                        <div class="parameter-group">
-                            <label for="weekTypeSelect">זמן בשבוע:</label>
-                            <select id="weekTypeSelect" class="parameter-input">
-                                <option value="weekday">אמצע שבוע</option>
-                                <option value="weekend">סוף שבוע</option>
-                            </select>
-                        </div>
-
-                        <div class="parameter-group">
-                            <label for="timeOfDaySelect">זמן ביום:</label>
-                            <select id="timeOfDaySelect" class="parameter-input">
-                                <option value="morning">בוקר (6-12)</option>
-                                <option value="afternoon">צהריים (12-18)</option>
-                                <option value="evening">ערב (18-22)</option>
-                                <option value="night">לילה (22-6)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
+                <button type="button" id="downloadGpkgBtn" class="download-gpkg-btn hidden">
+                    <span id="downloadBtnText">הורד GPKG</span>
+                    <span id="downloadLoadingSpinner" class="spinner hidden">⏳</span>
+                </button>
             </form>
+
+            <div id="loadingMessage" class="inline-loading-message hidden">טוען נתונים...</div>
+            <div id="statusMessage" class="inline-status-message hidden"></div>
         </div>
+    </div> -->
 
-        <div id="statusMessage" class="status-message hidden"></div>
+    <!-- Top search bar -->
+    <div class="top-search-bar">
+        <div class="search-bar-content">
+            <h1>חיזוי נפח הולכי רגל</h1>
 
-        <div class="results-container">
-            <div id="mapContainer" class="map-container">
-                <div class="map-header">
-                    <h3 id="mapTitle">מפת רחובות</h3>
-                    <div id="loadingMessage" class="loading-message hidden">טוען נתונים...</div>
-                    <div id="mapStats" class="map-stats"></div>
-                </div>
-                <div id="map" class="map"></div>
-                <div class="legend">
-                    <h4>מקרא:</h4>
-                    <div id="legendItems"></div>
-                </div>
-            </div>
-            
-            <div id="detailsContainer" class="details-container hidden">
-                <h3>פרטי תחזית</h3>
-                <div id="predictionDetails" class="prediction-details"></div>
-            </div>
+            <!-- Toolbar centered with fixed sizes -->
+            <form id="searchForm" class="search-form toolbar">
+            <input 
+                type="text"
+                id="cityInput"
+                placeholder="שם עיר (Monaco / Tel Aviv / Jerusalem)"
+                required
+                dir="ltr"
+            />
+
+            <select id="seasonSelect" class="parameter-input toolbar-input">
+                <option value="winter">חורף</option>
+                <option value="spring">אביב</option>
+                <option value="summer">קיץ</option>
+                <option value="autumn">סתיו</option>
+            </select>
+
+            <select id="weekTypeSelect" class="parameter-input toolbar-input">
+                <option value="weekday">אמצע שבוע</option>
+                <option value="weekend">סוף שבוע</option>
+            </select>
+
+            <select id="timeOfDaySelect" class="parameter-input toolbar-input">
+                <option value="morning">בוקר (6–12)</option>
+                <option value="afternoon">צהריים (12–18)</option>
+                <option value="evening">ערב (18–22)</option>
+                <option value="night">לילה (22–6)</option>
+            </select>
+
+            <button type="submit" id="searchBtn" class="toolbar-btn">
+                <span id="buttonText">חיפוש</span>
+                <span id="loadingSpinner" class="spinner hidden">⏳</span>
+            </button>
+
+            <!-- חשוב: מתחילים 'בלתי נראה' כדי לשמור מקום קבוע -->
+            <button type="button" id="downloadGpkgBtn" class="download-gpkg-btn toolbar-btn invisible">
+                <span id="downloadBtnText">הורד GPKG</span>
+                <span id="downloadLoadingSpinner" class="spinner hidden">⏳</span>
+            </button>
+            </form>
+
+            <!-- <div id="loadingMessage" class="inline-loading-message hidden">טוען נתונים...</div> -->
+            <div id="statusMessage" class="inline-status-message hidden"></div>
         </div>
     </div>
+
+    
+
+    <!-- Floating details panel -->
+    <div id="detailsPanel" class="floating-panel details-panel hidden">
+        <div class="panel-header">
+            <h3>פרטי תחזית</h3>
+            <button class="panel-toggle" id="detailsPanelToggle">
+                <span class="toggle-icon">−</span>
+            </button>
+        </div>
+        <div class="panel-content" id="detailsPanelContent">
+            <div id="predictionDetails" class="prediction-details"></div>
+        </div>
+    </div>
+
+    <!-- Floating legend -->
+    <div class="floating-legend">
+        <h4>מקרא:</h4>
+        <div id="legendItems"></div>
+    </div>
+
+    <!-- Map stats overlay - removed, integrated into top bar -->
 
     <!-- Leaflet JavaScript -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" 
             crossorigin=""></script>
     
-    <!-- API base resolver: use localStorage override, ?api= param, or default to Render URL -->
-    <!-- <script>
-    (function(){
-      const url = new URL(window.location.href);
-      const fromQuery = url.searchParams.get('api');
-      if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
-
-      window.API_BASE =
-        localStorage.getItem('API_BASE') ||
-        "https://pedestrian-api.onrender.com"; /* TODO: after first deploy, replace with your actual API URL from Render */
-    })();
-    </script> -->
+    <!-- API base resolver -->
     <script>
         (function () {
         const url = new URL(window.location.href);
@@ -127,10 +143,6 @@
             location.hostname === 'localhost' ||
             location.hostname === '127.0.0.1';
 
-        // סדר עדיפויות:
-        // 1) ?api=...
-        // 2) localStorage
-        // 3) ברירת מחדל: לוקאל אם רץ לוקאלית, אחרת Render
         window.API_BASE = ls ||
             (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
 
