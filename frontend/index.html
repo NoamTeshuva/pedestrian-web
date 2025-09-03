@@ -1,156 +1,135 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>חיזוי נפח הולכי רגל</title>
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
-          crossorigin=""/>
-    
-    <!-- Custom CSS -->
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <!-- Full screen map -->
-    <div id="map" class="fullscreen-map"></div>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>חיזוי נפח הולכי רגל</title>
+		<!-- Leaflet CSS -->
+		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+				integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+		<!-- Custom CSS -->
+		<link rel="stylesheet" href="styles.css">
+	</head>
+	<body>
+	<!-- Full screen map -->
+		<div id="map" class="fullscreen-map"></div>
 
-    <!-- Top search bar
-    <div class="top-search-bar">
-        <div class="search-bar-content">
-            <h1>חיזוי נפח הולכי רגל</h1>
-            
-            <form id="searchForm" class="search-form inline-form">
-                <div class="input-group">
-                    <input 
-                        type="text" 
-                        id="cityInput" 
-                        placeholder="הזן שם עיר (לדוגמה: Monaco, Tel Aviv, Jerusalem)"
-                        required
-                        dir="ltr"
-                    >
-                    <button type="submit" id="searchBtn">
-                        <span id="buttonText">חיפוש</span>
-                        <span id="loadingSpinner" class="spinner hidden">⏳</span>
-                    </button>
-                </div>
+	<!-- Top search bar -->
+		<div class="top-search-bar">
+			<div class="search-bar-content">
+				<h1>חיזוי נפח הולכי רגל</h1>
 
-                <button type="button" class="parameters-toggle" id="parametersToggle">
-                    <span>⚙️ פרמטרים</span>
-                </button>
+				<!-- Toolbar with two rows -->
+				<form id="searchForm" class="search-form toolbar">
+					<!-- Row 1: Parameters and file selection -->
+					<div class="toolbar-row parameters-row">
+						<!-- File selection button positioned to the left of time of day -->
+						<label class="file-btn">
+							<!-- File selection button positioned to the left of time of day -->
+							בחירת קובץ GPKG
+							<input id="gpkgInput" type="file" accept=".gpkg" />
+						</label>
+						<input 
+							type="text"
+							id="cityInput"
+							placeholder="הזן את שם העיר"
+							required
+							dir="ltr"
+						/>
 
-                <button type="button" id="downloadGpkgBtn" class="download-gpkg-btn hidden">
-                    <span id="downloadBtnText">הורד GPKG</span>
-                    <span id="downloadLoadingSpinner" class="spinner hidden">⏳</span>
-                </button>
-            </form>
+						<select id="seasonSelect" class="parameter-input toolbar-input">
+							<option value="winter">חורף</option>
+							<option value="spring">אביב</option>
+							<option value="summer">קיץ</option>
+							<option value="autumn">סתיו</option>
+						</select>
 
-            <div id="loadingMessage" class="inline-loading-message hidden">טוען נתונים...</div>
-            <div id="statusMessage" class="inline-status-message hidden"></div>
-        </div>
-    </div> -->
+						<select id="weekTypeSelect" class="parameter-input toolbar-input">
+							<option value="weekday">אמצע שבוע</option>
+							<option value="weekend">סוף שבוע</option>
+						</select>
 
-    <!-- Top search bar -->
-    <div class="top-search-bar">
-        <div class="search-bar-content">
-            <h1>חיזוי נפח הולכי רגל</h1>
+						<select id="timeOfDaySelect" class="parameter-input toolbar-input">
+							<option value="morning">בוקר (6–12)</option>
+							<option value="afternoon">צהריים (12–18)</option>
+							<option value="evening">ערב (18–22)</option>
+							<option value="night">לילה (22–6)</option>
+						</select>
 
-            <!-- Toolbar centered with fixed sizes -->
-            <form id="searchForm" class="search-form toolbar">
-            <input 
-                type="text"
-                id="cityInput"
-                placeholder="שם עיר (Monaco / Tel Aviv / Jerusalem)"
-                required
-                dir="ltr"
-            />
+					</div>
 
-            <select id="seasonSelect" class="parameter-input toolbar-input">
-                <option value="winter">חורף</option>
-                <option value="spring">אביב</option>
-                <option value="summer">קיץ</option>
-                <option value="autumn">סתיו</option>
-            </select>
+					<!-- Row 2: Action buttons -->
+					<div class="toolbar-row actions-row">
+						<!-- Left side: Send file button -->
+						<div class="file-send-wrapper">
+							<button type="button" id="sendGpkgBtn" class="send-file-btn" disabled>שלח קובץ</button>
+						</div>
+						
+						<!-- Center: Search and Download buttons -->
+						<div class="center-buttons">
+							<button type="submit" id="searchBtn" class="toolbar-btn">
+								<span id="buttonText">חיפוש</span>
+								<span id="loadingSpinner" class="spinner hidden">⌛</span>
+							</button>
+							<button type="button" id="downloadGpkgBtn" class="download-gpkg-btn toolbar-btn invisible">
+								<span id="downloadBtnText">הורד GPKG</span>
+								<span id="downloadLoadingSpinner" class="spinner hidden">⌛</span>
+							</button>
+						</div>
+					</div>
+				</form>
 
-            <select id="weekTypeSelect" class="parameter-input toolbar-input">
-                <option value="weekday">אמצע שבוע</option>
-                <option value="weekend">סוף שבוע</option>
-            </select>
+				<div id="statusMessage" class="inline-status-message hidden"></div>
+			</div>
+		</div>
 
-            <select id="timeOfDaySelect" class="parameter-input toolbar-input">
-                <option value="morning">בוקר (6–12)</option>
-                <option value="afternoon">צהריים (12–18)</option>
-                <option value="evening">ערב (18–22)</option>
-                <option value="night">לילה (22–6)</option>
-            </select>
+	<!-- Loading message -->
+	<div id="loadingMessage" class="loading-message hidden">
+		<div class="inline-loading-message">
+			<span class="spinner">⌛</span>
+			<span>מעבד נתונים...</span>
+		</div>
+	</div>
 
-            <button type="submit" id="searchBtn" class="toolbar-btn">
-                <span id="buttonText">חיפוש</span>
-                <span id="loadingSpinner" class="spinner hidden">⏳</span>
-            </button>
+	<!-- Floating details panel -->
+	<div id="detailsPanel" class="floating-panel details-panel hidden">
+		<div class="panel-header">
+		<h3>פרטי תחזית</h3>
+		<button class="panel-toggle" id="detailsPanelToggle">
+			<span class="toggle-icon">−</span>
+		</button>
+		</div>
+		<div class="panel-content" id="detailsPanelContent">
+		<div id="predictionDetails" class="prediction-details"></div>
+		</div>
+	</div>
 
-            <!-- חשוב: מתחילים 'בלתי נראה' כדי לשמור מקום קבוע -->
-            <button type="button" id="downloadGpkgBtn" class="download-gpkg-btn toolbar-btn invisible">
-                <span id="downloadBtnText">הורד GPKG</span>
-                <span id="downloadLoadingSpinner" class="spinner hidden">⏳</span>
-            </button>
-            </form>
+	<!-- Floating legend -->
+	<div class="floating-legend">
+		<h4>מקרא:</h4>
+		<div id="legendItems"></div>
+	</div>
 
-            <!-- <div id="loadingMessage" class="inline-loading-message hidden">טוען נתונים...</div> -->
-            <div id="statusMessage" class="inline-status-message hidden"></div>
-        </div>
-    </div>
+	<!-- Leaflet JavaScript -->
+	<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+			integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-    
+	<!-- API base resolver -->
+	<script>
+		(function () {
+		const url = new URL(window.location.href);
+		const fromQuery = url.searchParams.get('api');
+		if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
 
-    <!-- Floating details panel -->
-    <div id="detailsPanel" class="floating-panel details-panel hidden">
-        <div class="panel-header">
-            <h3>פרטי תחזית</h3>
-            <button class="panel-toggle" id="detailsPanelToggle">
-                <span class="toggle-icon">−</span>
-            </button>
-        </div>
-        <div class="panel-content" id="detailsPanelContent">
-            <div id="predictionDetails" class="prediction-details"></div>
-        </div>
-    </div>
+		const ls = localStorage.getItem('API_BASE');
+		const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-    <!-- Floating legend -->
-    <div class="floating-legend">
-        <h4>מקרא:</h4>
-        <div id="legendItems"></div>
-    </div>
+		window.API_BASE = ls || (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
+		console.log('[API_BASE]', window.API_BASE);
+		})();
+	</script>
 
-    <!-- Map stats overlay - removed, integrated into top bar -->
-
-    <!-- Leaflet JavaScript -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" 
-            crossorigin=""></script>
-    
-    <!-- API base resolver -->
-    <script>
-        (function () {
-        const url = new URL(window.location.href);
-        const fromQuery = url.searchParams.get('api');
-        if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
-
-        const ls = localStorage.getItem('API_BASE');
-        const isLocal =
-            location.hostname === 'localhost' ||
-            location.hostname === '127.0.0.1';
-
-        window.API_BASE = ls ||
-            (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
-
-        console.log('[API_BASE]', window.API_BASE);
-        })();
-    </script>
-    
-    <!-- Custom JavaScript -->
-    <script src="script.js"></script>
-</body>
+	<!-- Custom JavaScript -->
+	<script src="script.js" defer></script>
+	</body>
 </html>

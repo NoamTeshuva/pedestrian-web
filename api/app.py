@@ -37,6 +37,7 @@ import json
 import numpy as np
 import networkx as nx
 import geopandas as gpd
+import fiona
 from shapely.geometry import LineString, Point
 from shapely.ops import unary_union
 from shapely.validation import make_valid
@@ -1389,6 +1390,686 @@ def ping():
 def health():
     """Health check endpoint."""
     return jsonify({"status": "ok", "service": "pedestrian-api", "port": 8000})
+
+
+# @app.route("/read-gpkg", methods=["POST"])
+# def read_gpkg():
+#     """
+#     קבלת קובץ GPKG, חילוץ מאפיינים, הרצת מודל, והחזרת תוצאות חיזוי חדשות.
+#     מחזיר: { "layers":[ { "name":..., "feature_count": int, "geojson": FeatureCollection }, ... ],
+#              "bbox":[west,south,east,north], "predictions": {...} }
+#     """
+#     try:
+#         if "file" not in request.files:
+#             return jsonify({"error": "missing file"}), 400
+        
+#         uploaded_file = request.files["file"]
+#         if not uploaded_file.filename:
+#             return jsonify({"error": "no file selected"}), 400
+            
+#         if not uploaded_file.filename.lower().endswith(".gpkg"):
+#             return jsonify({"error": "only .gpkg files are accepted"}), 400
+
+#         # יצירת קובץ זמני
+#         fd, tmp_path = tempfile.mkstemp(suffix=".gpkg", dir=DATA_DIR)
+#         os.close(fd)
+        
+#         try:
+#             # שמירת הקובץ המועלה
+#             uploaded_file.save(tmp_path)
+            
+#             # בדיקת תקינות הקובץ
+#             if os.path.getsize(tmp_path) == 0:
+#                 return jsonify({"error": "uploaded file is empty"}), 400
+
+#             # קריאת שכבות הקובץ
+#             try:
+#                 layers = fiona.listlayers(tmp_path)
+#                 if not layers:
+#                     return jsonify({"error": "no layers found in GPKG file"}), 400
+                    
+#             except Exception as e:
+#                 logging.error(f"Failed to read GPKG layers: {e}")
+#                 return jsonify({"error": f"failed to read GPKG file: {str(e)}"}), 400
+
+#             # חיפוש שכבה עם נתוני חיזוי (בדרך כלל "predictions")
+#             prediction_layer = None
+#             prediction_gdf = None
+            
+#             for layer_name in layers:
+#                 try:
+#                     gdf = gpd.read_file(tmp_path, layer=layer_name)
+                    
+#                     # בדיקה אם השכבה מכילה את העמודות הנדרשות למודל
+#                     required_cols = ['edge_id', 'osmid', 'highway', 'land_use', 'length', 
+#                                    'betweenness', 'closeness', 'search_hour', 'search_is_weekend', 
+#                                    'search_time_of_day']
+                    
+#                     if all(col in gdf.columns for col in required_cols):
+#                         prediction_layer = layer_name
+#                         prediction_gdf = gdf
+#                         logging.info(f"Found prediction layer: {layer_name}")
+#                         break
+                        
+#                 except Exception as e:
+#                     logging.warning(f"Error reading layer {layer_name}: {e}")
+#                     continue
+            
+#             if prediction_gdf is None or prediction_gdf.empty:
+#                 return jsonify({"error": "no valid prediction layer found with required columns"}), 400
+
+#             # הכנת נתונים למודל
+#             model_ready_data = _prepare_gpkg_data_for_model(prediction_gdf)
+            
+#             if model_ready_data.empty:
+#                 return jsonify({"error": "no valid data for model prediction"}), 400
+
+#             # בדיקה שהמודל זמין
+#             if model is None:
+#                 return jsonify({"error": "Model not available"}), 503
+
+#             # הרצת מודל
+#             logging.info(f"Running model prediction for {len(model_ready_data)} edges from GPKG")
+            
+#             # הכנת נתונים למודל CatBoost
+#             cat_feature_indices = [model_ready_data.columns.get_loc(col) 
+#                                  for col in CAT_COLS if col in model_ready_data.columns]
+            
+#             # וידוא שעמודות קטגוריות הן strings
+#             for col in CAT_COLS:
+#                 if col in model_ready_data.columns:
+#                     model_ready_data[col] = model_ready_data[col].astype(str)
+            
+#             # יצירת Pool והרצת חיזוי
+#             pool = Pool(model_ready_data, cat_features=cat_feature_indices)
+#             predictions = model.predict(pool)
+#             probabilities = model.predict_proba(pool)
+            
+#             # עדכון ה-GeoDataFrame עם תוצאות חדשות
+#             updated_gdf = _update_gdf_with_predictions(prediction_gdf, predictions, probabilities)
+            
+#             # יצירת תשובה מלאה
+#             response_data = _create_gpkg_response(updated_gdf, tmp_path, layers, prediction_layer)
+            
+#             logging.info(f"Successfully processed GPKG and ran predictions for {len(predictions)} edges")
+            
+#             return jsonify(response_data)
+
+#         except Exception as e:
+#             logging.error(f"Error processing GPKG file: {e}")
+#             return jsonify({"error": f"failed to process GPKG file: {str(e)}"}), 500
+            
+#         finally:
+#             # ניקוי הקובץ הזמני
+#             try:
+#                 os.remove(tmp_path)
+#             except Exception:
+#                 pass
+
+#     except Exception as e:
+#         logging.error(f"read-gpkg endpoint failed: {e}")
+#         return jsonify({"error": f"internal server error: {str(e)}"}), 500
+
+
+# def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+#     """
+#     הכנת נתוני GPKG למודל - בחירת העמודות הנכונות ועיבוד.
+#     """
+#     try:
+#         # מיפוי עמודות GPKG לעמודות המודל
+#         model_columns = {
+#             'length': 'length',
+#             'betweenness': 'betweenness', 
+#             'closeness': 'closeness',
+#             'search_hour': 'Hour',
+#             'search_is_weekend': 'is_weekend',
+#             'search_time_of_day': 'time_of_day',
+#             'land_use': 'land_use',
+#             'highway': 'highway'
+#         }
+        
+#         # בחירת ושינוי שמות עמודות
+#         available_cols = {k: v for k, v in model_columns.items() if k in gdf.columns}
+        
+#         if len(available_cols) < len(model_columns):
+#             missing = set(model_columns.keys()) - set(available_cols.keys())
+#             logging.warning(f"Missing columns in GPKG: {missing}")
+        
+#         # יצירת DataFrame חדש עם השמות הנכונים
+#         model_data = pd.DataFrame()
+        
+#         for gpkg_col, model_col in available_cols.items():
+#             model_data[model_col] = gdf[gpkg_col].copy()
+        
+#         # מילוי ערכים חסרים
+#         defaults = {
+#             'length': 0.0,
+#             'betweenness': 0.0,
+#             'closeness': 0.0,
+#             'Hour': 12,
+#             'is_weekend': 0,
+#             'time_of_day': 'afternoon',
+#             'land_use': 'other',
+#             'highway': 'unclassified'
+#         }
+        
+#         for col, default_val in defaults.items():
+#             if col in PipelineConfig.FEATURE_COLUMNS:
+#                 if col not in model_data.columns:
+#                     model_data[col] = default_val
+#                 else:
+#                     model_data[col] = model_data[col].fillna(default_val)
+        
+#         # וידוא שיש לנו את כל העמודות הנדרשות
+#         final_columns = [col for col in PipelineConfig.FEATURE_COLUMNS if col in model_data.columns]
+#         model_data = model_data[final_columns].copy()
+        
+#         # ניקוי נתונים
+#         model_data = model_data.replace([np.inf, -np.inf], 0).fillna(0)
+        
+#         logging.info(f"Prepared {len(model_data)} rows with {len(final_columns)} features for model")
+        
+#         return model_data
+        
+#     except Exception as e:
+#         logging.error(f"Error preparing GPKG data for model: {e}")
+#         return pd.DataFrame()
+
+
+# def _update_gdf_with_predictions(original_gdf: gpd.GeoDataFrame, 
+#                                 predictions: np.ndarray, 
+#                                 probabilities: np.ndarray) -> gpd.GeoDataFrame:
+#     """
+#     עדכון ה-GeoDataFrame עם תוצאות החיזוי החדשות.
+#     """
+#     updated_gdf = original_gdf.copy()
+    
+#     # עדכון תוצאות חיזוי
+#     updated_gdf['volume_bin'] = predictions.astype(int)
+#     updated_gdf['volume_class'] = predictions.astype(int)  # alias
+    
+#     # עדכון הסתברויות
+#     if probabilities.ndim > 1:
+#         for i in range(probabilities.shape[1]):
+#             updated_gdf[f'proba_{i+1}'] = probabilities[:, i]
+#         updated_gdf['proba_top'] = probabilities.max(axis=1)
+#     else:
+#         updated_gdf['proba_1'] = probabilities
+#         updated_gdf['proba_top'] = probabilities
+    
+#     # הוספת timestamp של החיזוי
+#     updated_gdf['prediction_timestamp'] = pd.Timestamp.now().isoformat()
+    
+#     return updated_gdf
+
+
+# def _create_gpkg_response(updated_gdf: gpd.GeoDataFrame, 
+#                          tmp_path: str, 
+#                          all_layers: list[str], 
+#                          prediction_layer: str) -> dict:
+#     """
+#     יצירת תשובה מלאה עם שכבות + תוצאות חיזוי.
+#     """
+#     out_layers = []
+#     global_bounds = None
+    
+#     # עיבוד כל השכבות (כולל השכבה המעודכנת)
+#     for layer_name in all_layers:
+#         try:
+#             if layer_name == prediction_layer:
+#                 # השתמש בנתונים המעודכנים
+#                 gdf = updated_gdf.copy()
+#             else:
+#                 # קרא שכבות אחרות כרגיל
+#                 gdf = gpd.read_file(tmp_path, layer=layer_name)
+            
+#             # וידוא CRS
+#             if gdf.crs is None:
+#                 gdf = gdf.set_crs(4326, allow_override=True)
+#             elif str(gdf.crs).upper() != "EPSG:4326":
+#                 gdf = gdf.to_crs(4326)
+            
+#             # הגבלת גודל
+#             if len(gdf) > 20000:
+#                 logging.info(f"Sampling {layer_name} from {len(gdf)} to 20000 features")
+#                 gdf = gdf.sample(20000, random_state=1)
+            
+#             # ניקוי גיאומטריות
+#             gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty].copy()
+            
+#             if gdf.empty:
+#                 continue
+            
+#             # יצירת GeoJSON נקי
+#             gj = clean_geojson(gdf.__geo_interface__)
+            
+#             out_layers.append({
+#                 "name": layer_name,
+#                 "feature_count": int(len(gdf)),
+#                 "geojson": gj,
+#                 "is_prediction_layer": layer_name == prediction_layer
+#             })
+            
+#             # חישוב bbox
+#             try:
+#                 bounds = gdf.total_bounds
+#                 if global_bounds is None:
+#                     global_bounds = bounds
+#                 else:
+#                     global_bounds = [
+#                         min(global_bounds[0], bounds[0]),
+#                         min(global_bounds[1], bounds[1]),
+#                         max(global_bounds[2], bounds[2]),
+#                         max(global_bounds[3], bounds[3]),
+#                     ]
+#             except Exception as e:
+#                 logging.warning(f"Failed to calculate bounds for layer {layer_name}: {e}")
+                
+#         except Exception as e:
+#             logging.warning(f"Failed to process layer {layer_name}: {e}")
+#             continue
+    
+#     # הכנת bbox
+#     bbox = None
+#     if global_bounds is not None:
+#         minx, miny, maxx, maxy = [float(x) for x in global_bounds]
+#         bbox = [minx, miny, maxx, maxy]
+    
+#     # סטטיסטיקות חיזוי
+#     prediction_stats = None
+#     if prediction_layer and 'volume_bin' in updated_gdf.columns:
+#         prediction_stats = {
+#             "total_edges": len(updated_gdf),
+#             "volume_distribution": updated_gdf['volume_bin'].value_counts().to_dict(),
+#             "avg_confidence": float(updated_gdf['proba_top'].mean()) if 'proba_top' in updated_gdf.columns else None
+#         }
+    
+#     return {
+#         "success": True,
+#         "layers": out_layers,
+#         "bbox": bbox,
+#         "total_layers": len(out_layers),
+#         "total_features": sum(layer["feature_count"] for layer in out_layers),
+#         "prediction_layer": prediction_layer,
+#         "prediction_stats": prediction_stats,
+#         "model_run": True
+#     }
+
+@app.route("/read-gpkg", methods=["POST"])
+def read_gpkg():
+    """
+    קבלת קובץ GPKG, חילוץ מאפיינים, הרצת מודל, והחזרת תוצאות חיזוי חדשות.
+    מחזיר: { "layers":[ { "name":..., "feature_count": int, "geojson": FeatureCollection }, ... ],
+             "bbox":[west,south,east,north], "predictions": {...} }
+    """
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "missing file"}), 400
+        
+        uploaded_file = request.files["file"]
+        if not uploaded_file.filename:
+            return jsonify({"error": "no file selected"}), 400
+            
+        if not uploaded_file.filename.lower().endswith(".gpkg"):
+            return jsonify({"error": "only .gpkg files are accepted"}), 400
+
+        # יצירת קובץ זמני
+        fd, tmp_path = tempfile.mkstemp(suffix=".gpkg", dir=DATA_DIR)
+        os.close(fd)
+        
+        try:
+            # שמירת הקובץ המועלה
+            uploaded_file.save(tmp_path)
+            
+            # בדיקת תקינות הקובץ
+            if os.path.getsize(tmp_path) == 0:
+                return jsonify({"error": "uploaded file is empty"}), 400
+
+            # קריאת שכבות הקובץ
+            try:
+                layers = fiona.listlayers(tmp_path)
+                if not layers:
+                    return jsonify({"error": "no layers found in GPKG file"}), 400
+                    
+            except Exception as e:
+                logging.error(f"Failed to read GPKG layers: {e}")
+                return jsonify({"error": f"failed to read GPKG file: {str(e)}"}), 400
+
+            # חיפוש שכבה עם נתוני חיזוי (בדרך כלל "predictions")
+            prediction_layer = None
+            prediction_gdf = None
+            
+            for layer_name in layers:
+                try:
+                    gdf = gpd.read_file(tmp_path, layer=layer_name)
+                    
+                    # לוג את העמודות הזמינות
+                    logging.info(f"Layer '{layer_name}' columns: {list(gdf.columns)}")
+                    
+                    # בדיקה גמישה יותר - מיפוי העמודות בפועל מהקובץ שלך
+                    required_mapping = {
+                        'edge_id': ['edge_id', 'EdgeID', 'EDGE_ID', 'u'],  # נשתמש ב-u אם אין edge_id
+                        'osmid': ['osmid', 'OSMID', 'osm_id', 'OSM_ID'],
+                        'highway': ['highway', 'Highway', 'HIGHWAY'],
+                        'land_use': ['land_use', 'landuse', 'LAND_USE', 'LANDUSE'],
+                        'length': ['length', 'Length', 'LENGTH'],
+                        'betweenness': ['betweenness', 'Betweenness', 'BETWEENNESS'],
+                        'closeness': ['closeness', 'Closeness', 'CLOSENESS'],
+                        'search_hour': ['search_hour', 'Hour', 'HOUR', 'hour'],  # יש לך Hour
+                        'search_is_weekend': ['search_is_weekend', 'is_weekend', 'IS_WEEKEND', 'weekend'],  # יש לך is_weekend
+                        'search_time_of_day': ['search_time_of_day', 'time_of_day', 'TIME_OF_DAY', 'timeofday']  # יש לך time_of_day
+                    }
+                    
+                    # בדיקה כמה עמודות נמצאו
+                    found_cols = {}
+                    missing_cols = []
+                    
+                    for required_col, possible_names in required_mapping.items():
+                        found = False
+                        for possible_name in possible_names:
+                            if possible_name in gdf.columns:
+                                found_cols[required_col] = possible_name
+                                found = True
+                                break
+                        if not found:
+                            missing_cols.append(required_col)
+                    
+                    logging.info(f"Layer '{layer_name}': Found {len(found_cols)}/{len(required_mapping)} required columns")
+                    logging.info(f"Found columns mapping: {found_cols}")
+                    if missing_cols:
+                        logging.info(f"Missing columns: {missing_cols}")
+                    
+                    # אם מצאנו לפחות את העמודות הבסיסיות הנדרשות למודל
+                    essential_cols = ['osmid', 'highway', 'land_use', 'length', 'betweenness', 'closeness']
+                    found_essential = [col for col in essential_cols if col in found_cols]
+                    
+                    if len(found_essential) >= 6:  # צריכים לפחות את כל העמודות החיוניות
+                        prediction_layer = layer_name
+                        prediction_gdf = gdf
+                        
+                        # יצירת edge_id אם חסר
+                        if 'edge_id' not in found_cols and 'u' in gdf.columns:
+                            if 'v' in gdf.columns and 'key' in gdf.columns:
+                                gdf['edge_id'] = gdf['u'].astype(str) + '_' + gdf['v'].astype(str) + '_' + gdf['key'].astype(str)
+                            else:
+                                gdf['edge_id'] = gdf['u'].astype(str) + '_' + gdf.index.astype(str)
+                            found_cols['edge_id'] = 'edge_id'
+                            logging.info(f"Created edge_id from u, v, key columns")
+                        
+                        # שמירת המיפוי של העמודות
+                        prediction_gdf._column_mapping = found_cols
+                        
+                        logging.info(f"Found valid prediction layer: {layer_name}")
+                        break
+                        
+                except Exception as e:
+                    logging.warning(f"Error reading layer {layer_name}: {e}")
+                    continue
+            
+            if prediction_gdf is None or prediction_gdf.empty:
+                return jsonify({"error": "no valid prediction layer found with required columns"}), 400
+
+            # הכנת נתונים למודל
+            model_ready_data = _prepare_gpkg_data_for_model(prediction_gdf)
+            
+            if model_ready_data.empty:
+                return jsonify({"error": "no valid data for model prediction"}), 400
+
+            # בדיקה שהמודל זמין
+            if model is None:
+                return jsonify({"error": "Model not available"}), 503
+
+            # הרצת מודל
+            logging.info(f"Running model prediction for {len(model_ready_data)} edges from GPKG")
+            
+            # הכנת נתונים למודל CatBoost
+            cat_feature_indices = [model_ready_data.columns.get_loc(col) 
+                                 for col in CAT_COLS if col in model_ready_data.columns]
+            
+            # וידוא שעמודות קטגוריות הן strings
+            for col in CAT_COLS:
+                if col in model_ready_data.columns:
+                    model_ready_data[col] = model_ready_data[col].astype(str)
+            
+            # יצירת Pool והרצת חיזוי
+            pool = Pool(model_ready_data, cat_features=cat_feature_indices)
+            predictions = model.predict(pool)
+            probabilities = model.predict_proba(pool)
+            
+            # עדכון ה-GeoDataFrame עם תוצאות חדשות
+            updated_gdf = _update_gdf_with_predictions(prediction_gdf, predictions, probabilities)
+            
+            # יצירת תשובה מלאה
+            response_data = _create_gpkg_response(updated_gdf, tmp_path, layers, prediction_layer)
+            
+            logging.info(f"Successfully processed GPKG and ran predictions for {len(predictions)} edges")
+            
+            return jsonify(response_data)
+
+        except Exception as e:
+            logging.error(f"Error processing GPKG file: {e}")
+            return jsonify({"error": f"failed to process GPKG file: {str(e)}"}), 500
+            
+        finally:
+            # ניקוי הקובץ הזמני
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logging.error(f"read-gpkg endpoint failed: {e}")
+        return jsonify({"error": f"internal server error: {str(e)}"}), 500
+
+
+def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
+    """
+    הכנת נתוני GPKG למודל - בחירת העמודות הנכונות ועיבוד.
+    """
+    try:
+        # שימוש במיפוי העמודות ששמרנו
+        column_mapping = getattr(gdf, '_column_mapping', {})
+        logging.info(f"Using column mapping: {column_mapping}")
+        
+        # מיפוי עמודות GPKG לעמודות המודל (עם התאמה לקובץ שלך)
+        model_columns = {
+            'length': column_mapping.get('length', 'length'),
+            'betweenness': column_mapping.get('betweenness', 'betweenness'), 
+            'closeness': column_mapping.get('closeness', 'closeness'),
+            'search_hour': column_mapping.get('search_hour', 'Hour'),  # יש לך Hour במקום search_hour
+            'search_is_weekend': column_mapping.get('search_is_weekend', 'is_weekend'),  # יש לך is_weekend
+            'search_time_of_day': column_mapping.get('search_time_of_day', 'time_of_day'),  # יש לך time_of_day
+            'land_use': column_mapping.get('land_use', 'land_use'),
+            'highway': column_mapping.get('highway', 'highway')
+        }
+        
+        # מיפוי שמות עמודות המודל
+        model_column_names = {
+            'length': 'length',
+            'betweenness': 'betweenness', 
+            'closeness': 'closeness',
+            'search_hour': 'Hour',  # המודל מצפה ל-Hour
+            'search_is_weekend': 'is_weekend',  # המודל מצפה ל-is_weekend
+            'search_time_of_day': 'time_of_day',  # המודל מצפה ל-time_of_day
+            'land_use': 'land_use',
+            'highway': 'highway'
+        }
+        
+        # בחירת ושינוי שמות עמודות
+        model_data = pd.DataFrame()
+        
+        for gpkg_key, gpkg_col in model_columns.items():
+            if gpkg_col in gdf.columns:
+                model_col_name = model_column_names[gpkg_key]
+                model_data[model_col_name] = gdf[gpkg_col].copy()
+                logging.info(f"Mapped {gpkg_col} -> {model_col_name}")
+            else:
+                logging.warning(f"Column {gpkg_col} not found in GPKG")
+        
+        # מילוי ערכים חסרים
+        defaults = {
+            'length': 0.0,
+            'betweenness': 0.0,
+            'closeness': 0.0,
+            'Hour': 12,
+            'is_weekend': 0,
+            'time_of_day': 'afternoon',
+            'land_use': 'other',
+            'highway': 'unclassified'
+        }
+        
+        for col, default_val in defaults.items():
+            if col in PipelineConfig.FEATURE_COLUMNS:
+                if col not in model_data.columns:
+                    model_data[col] = default_val
+                    logging.info(f"Added missing column {col} with default value {default_val}")
+                else:
+                    before_fill = model_data[col].isna().sum()
+                    model_data[col] = model_data[col].fillna(default_val)
+                    if before_fill > 0:
+                        logging.info(f"Filled {before_fill} missing values in {col}")
+        
+        # וידוא שיש לנו את כל העמודות הנדרשות
+        final_columns = [col for col in PipelineConfig.FEATURE_COLUMNS if col in model_data.columns]
+        model_data = model_data[final_columns].copy()
+        
+        # ניקוי נתונים
+        model_data = model_data.replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # המרת עמודות קטגוריות לstring
+        categorical_cols = [col for col in PipelineConfig.CATEGORICAL_COLUMNS if col in model_data.columns]
+        for col in categorical_cols:
+            model_data[col] = model_data[col].astype(str)
+        
+        logging.info(f"Prepared {len(model_data)} rows with {len(final_columns)} features for model")
+        logging.info(f"Final columns: {final_columns}")
+        logging.info(f"Sample data:\n{model_data.head()}")
+        
+        return model_data
+        
+    except Exception as e:
+        logging.error(f"Error preparing GPKG data for model: {e}")
+        return pd.DataFrame()
+
+
+def _update_gdf_with_predictions(original_gdf: gpd.GeoDataFrame, 
+                                predictions: np.ndarray, 
+                                probabilities: np.ndarray) -> gpd.GeoDataFrame:
+    """
+    עדכון ה-GeoDataFrame עם תוצאות החיזוי החדשות.
+    """
+    updated_gdf = original_gdf.copy()
+    
+    # עדכון תוצאות חיזוי
+    updated_gdf['volume_bin'] = predictions.astype(int)
+    updated_gdf['volume_class'] = predictions.astype(int)  # alias
+    
+    # עדכון הסתברויות
+    if probabilities.ndim > 1:
+        for i in range(probabilities.shape[1]):
+            updated_gdf[f'proba_{i+1}'] = probabilities[:, i]
+        updated_gdf['proba_top'] = probabilities.max(axis=1)
+    else:
+        updated_gdf['proba_1'] = probabilities
+        updated_gdf['proba_top'] = probabilities
+    
+    # הוספת timestamp של החיזוי
+    updated_gdf['prediction_timestamp'] = pd.Timestamp.now().isoformat()
+    
+    return updated_gdf
+
+
+def _create_gpkg_response(updated_gdf: gpd.GeoDataFrame, 
+                         tmp_path: str, 
+                         all_layers: list, 
+                         prediction_layer: str) -> dict:
+    """
+    יצירת תשובה מלאה עם שכבות + תוצאות חיזוי.
+    """
+    out_layers = []
+    global_bounds = None
+    
+    # עיבוד כל השכבות (כולל השכבה המעודכנת)
+    for layer_name in all_layers:
+        try:
+            if layer_name == prediction_layer:
+                # השתמש בנתונים המעודכנים
+                gdf = updated_gdf.copy()
+            else:
+                # קרא שכבות אחרות כרגיל
+                gdf = gpd.read_file(tmp_path, layer=layer_name)
+            
+            # וידוא CRS
+            if gdf.crs is None:
+                gdf = gdf.set_crs(4326, allow_override=True)
+            elif str(gdf.crs).upper() != "EPSG:4326":
+                gdf = gdf.to_crs(4326)
+            
+            # הגבלת גודל
+            if len(gdf) > 20000:
+                logging.info(f"Sampling {layer_name} from {len(gdf)} to 20000 features")
+                gdf = gdf.sample(20000, random_state=1)
+            
+            # ניקוי גיאומטריות
+            gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty].copy()
+            
+            if gdf.empty:
+                continue
+            
+            # יצירת GeoJSON נקי
+            gj = clean_geojson(gdf.__geo_interface__)
+            
+            out_layers.append({
+                "name": layer_name,
+                "feature_count": int(len(gdf)),
+                "geojson": gj,
+                "is_prediction_layer": layer_name == prediction_layer
+            })
+            
+            # חישוב bbox
+            try:
+                bounds = gdf.total_bounds
+                if global_bounds is None:
+                    global_bounds = bounds
+                else:
+                    global_bounds = [
+                        min(global_bounds[0], bounds[0]),
+                        min(global_bounds[1], bounds[1]),
+                        max(global_bounds[2], bounds[2]),
+                        max(global_bounds[3], bounds[3]),
+                    ]
+            except Exception as e:
+                logging.warning(f"Failed to calculate bounds for layer {layer_name}: {e}")
+                
+        except Exception as e:
+            logging.warning(f"Failed to process layer {layer_name}: {e}")
+            continue
+    
+    # הכנת bbox
+    bbox = None
+    if global_bounds is not None:
+        minx, miny, maxx, maxy = [float(x) for x in global_bounds]
+        bbox = [minx, miny, maxx, maxy]
+    
+    # סטטיסטיקות חיזוי
+    prediction_stats = None
+    if prediction_layer and 'volume_bin' in updated_gdf.columns:
+        prediction_stats = {
+            "total_edges": len(updated_gdf),
+            "volume_distribution": updated_gdf['volume_bin'].value_counts().to_dict(),
+            "avg_confidence": float(updated_gdf['proba_top'].mean()) if 'proba_top' in updated_gdf.columns else None
+        }
+    
+    return {
+        "success": True,
+        "layers": out_layers,
+        "bbox": bbox,
+        "total_layers": len(out_layers),
+        "total_features": sum(layer["feature_count"] for layer in out_layers),
+        "prediction_layer": prediction_layer,
+        "prediction_stats": prediction_stats,
+        "model_run": True
+    }
 
 
 if __name__ == "__main__":
