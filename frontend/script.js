@@ -279,11 +279,12 @@ class PedestrianPredictionApp {
 				if (this.sendGpkgBtn) {
 					this.sendGpkgBtn.disabled = !this.selectedFile;
 				}
-
+				this.cityInput.value = "";
 				// ✓ ולידציה בסיסית של הקובץ
 				if (this.selectedFile) {
 					this.validateGpkgFile(this.selectedFile);
 				}
+				this.showDownloadButton(false);
 			});
 		}
 
@@ -389,74 +390,9 @@ class PedestrianPredictionApp {
 		return new Date(dt.getTime() + daysAhead * 24 * 60 * 60 * 1000);
 	}
 
-	// ✓ טיפול מתוקן בהעלאת GPKG
-	// async handleGpkgUpload() {
-	// 	if (!this.selectedFile) {
-	// 		this.showStatusMessage("בחר קובץ GPKG קודם", "error");
-	// 		return;
-	// 	}
-
-	// 	// ולידציה נוספת לפני שליחה
-	// 	if (!this.validateGpkgFile(this.selectedFile)) {
-	// 		return; // הודעת השגיאה כבר הוצגה
-	// 	}
-
-	// 	try {
-	// 		this.setLoading(true);
-	// 		this.showStatusMessage("מעלה וקורא קובץ GPKG...", "info");
-
-	// 		const formData = new FormData();
-	// 		formData.append("file", this.selectedFile);
-
-	// 		const response = await fetch(`${this.API_BASE_URL}/read-gpkg`, {
-	// 			method: "POST",
-	// 			body: formData,
-	// 		});
-
-	// 		if (!response.ok) {
-	// 			let errorMessage;
-	// 			try {
-	// 				const errorData = await response.json();
-	// 				errorMessage =
-	// 					errorData.error || `שגיאת שרת: ${response.status}`;
-	// 			} catch {
-	// 				errorMessage = `שגיאת שרת: ${response.status} ${response.statusText}`;
-	// 			}
-	// 			throw new Error(errorMessage);
-	// 		}
-
-	// 		const result = await response.json();
-
-	// 		// ✓ בדיקה שהתקבלו נתונים תקינים
-	// 		if (
-	// 			!result.layers ||
-	// 			!Array.isArray(result.layers) ||
-	// 			result.layers.length === 0
-	// 		) {
-	// 			throw new Error("הקובץ לא מכיל שכבות תקינות עם גיאומטריה");
-	// 		}
-
-	// 		// ✓ הצגת הנתונים על המפה
-	// 		await this.displayGpkgResults(result);
-
-	// 		// הודעת הצלחה מותאמת לחיזוי
-	// 		let message = `קובץ נטען בהצלחה - ${result.layers.length} שכבות`;
-	// 		if (result.model_run && result.prediction_stats) {
-	// 			message += `, חיזוי הופעל עבור ${result.prediction_stats.total_edges} רחובות`;
-	// 		}
-	// 		this.showStatusMessage(message, "success");
-	// 	} catch (error) {
-	// 		console.error("GPKG upload error:", error);
-	// 		this.showStatusMessage(
-	// 			`שגיאה בקריאת קובץ: ${error.message}`,
-	// 			"error"
-	// 		);
-	// 	} finally {
-	// 		this.setLoading(false);
-	// 	}
-	// }
-
 	async handleGpkgUpload() {
+		this.showDownloadButton(false);
+		this.lastPlaceName = null; // איפוס שם המקום האחרון
 		if (!this.selectedFile) {
 			this.showStatusMessage("בחר קובץ GPKG קודם", "error");
 			return;
@@ -473,7 +409,9 @@ class PedestrianPredictionApp {
 				"מעלה וקורא קובץ GPKG, מריץ חיזוי...",
 				"info"
 			);
+			this.showDownloadButton(false);
 
+			// שליחת הקובץ לשרת
 			const formData = new FormData();
 			formData.append("file", this.selectedFile);
 
@@ -525,83 +463,6 @@ class PedestrianPredictionApp {
 			this.setLoading(false);
 		}
 	}
-	// ✓ פונקציה מעודכנת להצגת תוצאות GPKG עם חיזוי
-	// async displayGpkgPredictionResults(result) {
-	// 	// מסיר שכבה קיימת
-	// 	if (this.currentLayer) {
-	// 		this.map.removeLayer(this.currentLayer);
-	// 	}
-
-	// 	const layerGroup = L.featureGroup();
-
-	// 	// מוסיף כל שכבה עם טיפול מיוחד בשכבת החיזוי
-	// 	for (const layer of result.layers) {
-	// 		if (
-	// 			layer.geojson &&
-	// 			layer.geojson.features &&
-	// 			layer.geojson.features.length > 0
-	// 		) {
-	// 			const geoJsonLayer = L.geoJSON(layer.geojson, {
-	// 				style: (feature) => {
-	// 					if (layer.is_prediction_layer) {
-	// 						// עיצוב כמו בחיפוש רגיל לשכבת החיזוי
-	// 						return this.getFeatureStyle(feature);
-	// 					} else {
-	// 						// עיצוב כללי לשכבות אחרות
-	// 						return {
-	// 							color: this.getGpkgLayerColor(layer.name),
-	// 							weight: 3,
-	// 							opacity: 0.8,
-	// 						};
-	// 					}
-	// 				},
-	// 				onEachFeature: (feature, leafletLayer) => {
-	// 					if (layer.is_prediction_layer) {
-	// 						// פופ-אפ כמו בחיפוש רגיל
-	// 						this.bindFeaturePopup(feature, leafletLayer);
-	// 					} else {
-	// 						// פופ-אפ כללי
-	// 						this.bindGpkgPopup(
-	// 							feature,
-	// 							leafletLayer,
-	// 							layer.name
-	// 						);
-	// 					}
-	// 				},
-	// 			});
-	// 			geoJsonLayer.addTo(layerGroup);
-	// 		}
-	// 	}
-
-	// 	if (layerGroup.getLayers().length > 0) {
-	// 		layerGroup.addTo(this.map);
-	// 		this.currentLayer = layerGroup;
-
-	// 		// התאמת תחום המפה
-	// 		if (result.bbox && result.bbox.length === 4) {
-	// 			const [west, south, east, north] = result.bbox;
-	// 			this.map.fitBounds(
-	// 				[
-	// 					[south, west],
-	// 					[north, east],
-	// 				],
-	// 				{ padding: [20, 20] }
-	// 			);
-	// 		} else {
-	// 			this.map.fitBounds(layerGroup.getBounds(), {
-	// 				padding: [20, 20],
-	// 			});
-	// 		}
-	// 	}
-
-	// 	// ✓ עדכון פאנל הפרטים עם מידע על החיזוי
-	// 	this.displayGpkgPredictionDetails(result);
-
-	// 	// הצגת כפתור הורדה אם יש תוצאות חיזוי
-	// 	if (result.model_run) {
-	// 		this.showDownloadButton(true);
-	// 	}
-	// }
 
 	// ✓ פונקציה מעודכנת להצגת תוצאות GPKG עם חיזוי
 	async displayGpkgPredictionResults(result) {
@@ -609,7 +470,7 @@ class PedestrianPredictionApp {
 		if (this.currentLayer) {
 			this.map.removeLayer(this.currentLayer);
 		}
-
+		// this.showDownloadButton(true);
 		const layerGroup = L.featureGroup();
 
 		// מוסיף כל שכבה עם טיפול מיוחד בשכבת החיזוי
@@ -677,7 +538,11 @@ class PedestrianPredictionApp {
 
 		// הצגת כפתור הורדה אם יש תוצאות חיזוי
 		if (result.model_run) {
-			this.showDownloadButton(true);
+			// this.showDownloadButton(true);
+			this.lastPlaceName =
+				this.cityInput.value || this.selectedFile?.name || "gpkg";
+		} else {
+			this.showDownloadButton(false);
 		}
 	}
 
@@ -719,119 +584,6 @@ class PedestrianPredictionApp {
 			className: "custom-popup",
 		});
 	}
-
-	// ✓ עדכון פאנל פרטים עבור GPKG
-	// displayGpkgPredictionDetails(result) {
-	// 	if (this.detailsPanel) {
-	// 		this.detailsPanel.classList.remove("hidden");
-	// 	}
-
-	// 	let totalFeatures = 0;
-	// 	const layerSummary = result.layers
-	// 		.map((layer) => {
-	// 			totalFeatures += layer.feature_count || 0;
-	// 			let suffix = "";
-	// 			if (layer.is_prediction_layer) {
-	// 				suffix = " (שכבת חיזוי)";
-	// 			}
-	// 			return `${layer.name}${suffix}: ${
-	// 				layer.feature_count || 0
-	// 			} פיצ'רים`;
-	// 		})
-	// 		.join("<br>");
-
-	// 	// חישוב סטטיסטיקות חיזוי
-	// 	let predictionSummary = "";
-	// 	if (
-	// 		result.prediction_stats &&
-	// 		result.prediction_stats.volume_distribution
-	// 	) {
-	// 		const dist = result.prediction_stats.volume_distribution;
-	// 		const sortedLevels = Object.keys(dist)
-	// 			.sort()
-	// 			.map((level) => {
-	// 				const count = dist[level];
-	// 				const percentage = (
-	// 					(count / result.prediction_stats.total_edges) *
-	// 					100
-	// 				).toFixed(1);
-	// 				return `רמה ${level}: ${count} רחובות (${percentage}%)`;
-	// 			});
-	// 		predictionSummary = `<br><strong>התפלגות עומס חזוי:</strong><br>${sortedLevels.join(
-	// 			"<br>"
-	// 		)}`;
-	// 	}
-
-	// 	if (this.predictionDetails) {
-	// 		this.predictionDetails.innerHTML = `
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">קובץ GPKG</div>
-	// 				<div class="detail-value highlight">${
-	// 					this.selectedFile?.name || "לא ידוע"
-	// 				}</div>
-	// 			</div>
-
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">מספר שכבות</div>
-	// 				<div class="detail-value">${result.layers.length}</div>
-	// 			</div>
-
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">סה"כ פיצ'רים</div>
-	// 				<div class="detail-value">${totalFeatures}</div>
-	// 			</div>
-
-	// 			${
-	// 				result.model_run
-	// 					? `
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">חיזוי הופעל</div>
-	// 				<div class="detail-value highlight">✓ כן</div>
-	// 			</div>
-
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">רחובות שנותחו</div>
-	// 				<div class="detail-value">${result.prediction_stats?.total_edges || 0}</div>
-	// 			</div>
-
-	// 			${
-	// 				result.prediction_stats?.avg_confidence
-	// 					? `
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">ממוצע ביטחון</div>
-	// 				<div class="detail-value">${(
-	// 					result.prediction_stats.avg_confidence * 100
-	// 				).toFixed(1)}%</div>
-	// 			</div>
-	// 			`
-	// 					: ""
-	// 			}
-	// 			`
-	// 					: ""
-	// 			}
-	// 						<div class="detail-item">
-	// 				<div class="detail-label">פירוט שכבות</div>
-	// 				<div class="detail-value" style="font-size: 0.9em;">
-	// 					${layerSummary}
-	// 					${predictionSummary}
-	// 				</div>
-	// 			</div>
-
-	// 			${
-	// 				result.bbox
-	// 					? `
-	// 			<div class="detail-item">
-	// 				<div class="detail-label">תחום גיאוגרפי</div>
-	// 				<div class="detail-value" style="font-size: 0.85em;">
-	// 					${result.bbox.map((coord) => coord.toFixed(4)).join(", ")}
-	// 				</div>
-	// 			</div>
-	// 			`
-	// 					: ""
-	// 			}
-	// 		`;
-	// 	}
-	// }
 
 	// ✓ עדכון פאנל פרטים עבור GPKG עם חיזוי
 	displayGpkgPredictionDetails(result) {
@@ -950,6 +702,10 @@ class PedestrianPredictionApp {
 		event.preventDefault();
 		if (this._inFlight) return;
 		this._inFlight = true;
+		if (this.gpkgInput) this.gpkgInput.value = "";
+		this.selectedFile = null;
+		if (this.sendGpkgBtn) this.sendGpkgBtn.disabled = true;
+		this.showDownloadButton(false);
 
 		const city = (this.cityInput?.value || "").trim();
 		if (!city) {
@@ -960,7 +716,7 @@ class PedestrianPredictionApp {
 
 		this.hideStatusMessage();
 		this.setLoading(true);
-		this.showLoadingOnMap(true);
+		// this.showLoadingOnMap(true);
 
 		// גיאוקוד + תזוזה לפני בקשה לשרת
 		await this.searchAndMoveToLocation(city);
@@ -1018,12 +774,14 @@ class PedestrianPredictionApp {
 			}
 
 			this.displayResults(data, city);
+			this.showDownloadButton(true);
 		} catch (error) {
 			console.error("Prediction error:", error);
 			this.showStatusMessage(`שגיאה: ${error.message}`, "error");
 		} finally {
 			this.setLoading(false);
-			this.showLoadingOnMap(false);
+
+			// this.showLoadingOnMap(false);
 			this._inFlight = false;
 		}
 	}
@@ -1279,7 +1037,7 @@ class PedestrianPredictionApp {
 		});
 
 		// Show GPKG download button
-		this.showDownloadButton(true);
+		// this.showDownloadButton(true);
 	}
 
 	getCurrentSearchParams() {
@@ -1672,7 +1430,7 @@ class PedestrianPredictionApp {
 
 	// ----- handleDownloadGpkg: place תמיד, bbox אופציונלי -----
 	async handleDownloadGpkg() {
-		const city = (this.cityInput?.value || "").trim();
+		const city = (this.cityInput?.value || this.lastPlaceName || "").trim();
 		if (!city) {
 			this.showStatusMessage("נא הזן שם עיר תחילה", "error");
 			return;
@@ -1693,15 +1451,30 @@ class PedestrianPredictionApp {
 				time_of_day: timeOfDay,
 			});
 
-			// ברירת מחדל: קובץ לפי שם העיר; אם תרצה כפתור/מצב "BBox" – נוסיף בהמשך.
-			params.set("place", city);
+			// בניית שם קובץ
+			const now = new Date();
+			const timestamp = now
+				.toISOString()
+				.replace(/[:.-]/g, "")
+				.slice(0, 15);
+			const citySlug = city.replace(/\s+/g, "_");
+			const filename = `predictions_${citySlug}_${season}_${weekType}_${timeOfDay}_${timestamp}.gpkg`;
 
+			// בניית URL ושליחה עם שם קובץ מותאם
 			const url = `${
 				this.API_BASE_URL
 			}/predict-gpkg?${params.toString()}`;
-			// הורדה בבאנה לשונית (לא פותח כרטיסיה חדשה)
-			window.location.href = url;
-			this.showStatusMessage("הורדת קובץ GPKG החלה!", "success");
+			const link = document.createElement("a");
+			link.href = url;
+			link.download = filename; // שם הקובץ הרצוי
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+
+			this.showStatusMessage(
+				"מכין מסמך GPKG להורדה, הפעולה עשויה להארך מספר דקות",
+				"info"
+			);
 		} catch (error) {
 			console.error("Download error:", error);
 			this.showStatusMessage(
@@ -1710,6 +1483,7 @@ class PedestrianPredictionApp {
 			);
 		} finally {
 			this.setDownloadLoading(false);
+			this.hideStatusMessage();
 		}
 	}
 

@@ -406,33 +406,35 @@ body {
 
 /* Messages */
 .inline-loading-message {
-  color: #fff;
+  color: #ca3131;
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+/* Normal status message */
 .inline-status-message, .status-message {
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(5, 165, 48, 0.7);
+  border: 1px solid rgba(17, 10, 10, 0.6);
   border-radius: 8px;
   padding: 8px 12px;
-  color: #fff;
+  color: #ffffff;
   font-weight: 500;
   font-size: 14px;
 }
 
+/* Error message style */
 .inline-status-message.error, .status-message.error {
-  background: rgba(248, 215, 218, 0.9);
-  border-color: #f5c6cb;
-  color: #721c24;
+  background: rgba(174, 10, 10, 0.9);
+  border-color: #110c0d;
+  color: #ffffff;
 }
 
 .inline-status-message.success, .status-message.success {
-  background: rgba(209, 237, 255, 0.9);
-  border-color: #bee5eb;
-  color: #0c5460;
+  background: rgba(17, 5, 125, 0.9);
+  border-color: #081517;
+  color: #ffffff;
 }
 
 /* Leaflet popup */
@@ -449,6 +451,12 @@ body {
 .spinner {
   display: inline-block;
   animation: spin 1s linear infinite;
+}
+
+#loadingSpinner.spinner {
+  font-size: 20px;       /* יותר גדול */
+  opacity: 1 !important; /* לא שקוף */
+  color: #000;           /* צבע שחור מלא */
 }
 
 @keyframes spin {
