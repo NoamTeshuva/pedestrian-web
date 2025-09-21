@@ -147,6 +147,7 @@ class PedestrianPredictionApp {
 		// GPKG upload elements
 		this.gpkgInput = document.getElementById("gpkgInput");
 		this.sendGpkgBtn = document.getElementById("sendGpkgBtn");
+		this.clearBBoxBtn = document.getElementById("clearBBoxBtn");
 	}
 
 	initializePanelToggles() {
@@ -300,6 +301,30 @@ class PedestrianPredictionApp {
 				this.handleDownloadGpkg()
 			);
 		}
+		if (this.clearBBoxBtn) {
+			this.clearBBoxBtn.addEventListener("click", () => {
+				// הסרת ריבוע
+				if (this.drawnItems) {
+					this.drawnItems.clearLayers();
+				}
+				// הסרת שכבה נוכחית
+				if (this.currentLayer) {
+					this.map.removeLayer(this.currentLayer);
+					this.currentLayer = null;
+				}
+				// איפוס חיפוש
+				if (this.cityInput) {
+					this.cityInput.value = "";
+				}
+				// החזרת כפתור למצב מוסתר
+				this.clearBBoxBtn.classList.add("invisible");
+
+				this.showStatusMessage(
+					"הריבוע נמחק. אפשר לחפש עיר מחדש.",
+					"success"
+				);
+			});
+		}
 	}
 
 	// ✓ ולידציה חדשה לקובץ GPKG
@@ -334,6 +359,89 @@ class PedestrianPredictionApp {
 		return true;
 	}
 
+	initializeDrawingTools() {
+		// יצירת FeatureGroup לאחסון צורות
+		this.drawnItems = new L.FeatureGroup();
+		this.map.addLayer(this.drawnItems);
+
+		// הגדרת בקרת ציור (רק מלבן)
+		this.drawControl = new L.Control.Draw({
+			draw: {
+				polygon: false,
+				polyline: false,
+				circle: false,
+				marker: false,
+				circlemarker: false,
+				rectangle: {
+					shapeOptions: {
+						color: "#ff7800",
+						weight: 2,
+					},
+				},
+			},
+			edit: {
+				featureGroup: this.drawnItems,
+				edit: false,
+				remove: true,
+			},
+		});
+		this.map.addControl(this.drawControl);
+
+		// אירוע ציור ריבוע
+		this.map.on(L.Draw.Event.CREATED, (e) => {
+			if (e.layerType === "rectangle") {
+				// מסיר ריבועים ושכבות קודמות
+				this.drawnItems.clearLayers();
+				if (this.currentLayer) {
+					this.map.removeLayer(this.currentLayer);
+					this.currentLayer = null;
+				}
+
+				const layer = e.layer;
+				this.drawnItems.addLayer(layer);
+				if (this.clearBBoxBtn) {
+					this.clearBBoxBtn.classList.remove("invisible");
+				}
+
+				// איפוס תיבת החיפוש
+				if (this.cityInput) {
+					this.cityInput.value = "";
+				}
+
+				// חשיפת כפתור מחיקת ריבוע
+				if (this.clearBBoxBtn) {
+					this.clearBBoxBtn.classList.remove("invisible");
+				}
+
+				// המרת ריבוע ל־BBox
+				const bounds = layer.getBounds();
+				const sw = bounds.getSouthWest();
+				const ne = bounds.getNorthEast();
+				const bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`;
+
+				console.log("[BBox]", bbox);
+
+				// שליחת bbox לשרת
+				this.fetchPredictionsByBBox(
+					{ lat: (sw.lat + ne.lat) / 2, lon: (sw.lng + ne.lng) / 2 },
+					null,
+					bbox
+				)
+					.then((data) => {
+						this.displayResults(data, "BBox בחירה");
+						this.showDownloadButton(true);
+					})
+					.catch((err) => {
+						console.error("BBox fetch error:", err);
+						this.showStatusMessage(
+							"שגיאה בהרצת חיזוי על הריבוע",
+							"error"
+						);
+					});
+			}
+		});
+	}
+
 	// -----------------------------
 	// Map
 	// -----------------------------
@@ -348,6 +456,8 @@ class PedestrianPredictionApp {
 			maxZoom: 19,
 			subdomains: ["a", "b", "c"],
 		}).addTo(this.map);
+		// הוספת כלי ציור
+		this.initializeDrawingTools();
 	}
 
 	// -----------------------------
@@ -927,26 +1037,81 @@ class PedestrianPredictionApp {
 		return data;
 	}
 
-	async fetchPredictionsByBBox(center, radiusKm = 3) {
-		if (
-			!center ||
-			typeof center.lat !== "number" ||
-			typeof center.lon !== "number"
-		) {
-			throw new Error("Center for BBox fallback is missing");
-		}
+	// async fetchPredictionsByBBox(center, radiusKm = 3) {
+	// 	if (
+	// 		!center ||
+	// 		typeof center.lat !== "number" ||
+	// 		typeof center.lon !== "number"
+	// 	) {
+	// 		throw new Error("Center for BBox fallback is missing");
+	// 	}
+	// 	const timeOfDay = this.timeOfDaySelect?.value || "morning";
+	// 	const weekType = this.weekTypeSelect?.value || "weekday";
+	// 	const season = this.seasonSelect?.value || "summer";
+	// 	const date = this.buildSearchDate();
+
+	// 	// Leaflet מספק כלי נוח להמרה לריבוע סביב נקודה
+	// 	const bounds = L.latLng(center.lat, center.lon).toBounds(
+	// 		radiusKm * 1000
+	// 	);
+	// 	const sw = bounds.getSouthWest();
+	// 	const ne = bounds.getNorthEast();
+	// 	const bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`; // west,south,east,north
+
+	// 	const params = new URLSearchParams({
+	// 		bbox,
+	// 		date,
+	// 		season,
+	// 		week_type: weekType,
+	// 		time_of_day: timeOfDay,
+	// 	});
+
+	// 	const url = `${this.API_BASE_URL}/predict?${params.toString()}`;
+	// 	const resp = await fetch(url, {
+	// 		headers: { Accept: "application/json" },
+	// 	});
+
+	// 	if (!resp.ok) {
+	// 		let errorMessage;
+	// 		try {
+	// 			const errorData = await resp.json();
+	// 			errorMessage = errorData.error || `שגיאת שרת: ${resp.status}`;
+	// 		} catch {
+	// 			errorMessage = `שגיאת שרת: ${resp.status} ${resp.statusText}`;
+	// 		}
+	// 		throw new Error(errorMessage);
+	// 	}
+
+	// 	const data = await resp.json();
+	// 	if (!data.geojson || !data.geojson.features) {
+	// 		throw new Error("לא התקבלו נתוני מפה מהשרת (BBox)");
+	// 	}
+	// 	return data;
+	// }
+
+	// -----------------------------
+	// Display
+	// -----------------------------
+
+	async fetchPredictionsByBBox(center, radiusKm = 3, explicitBBox = null) {
 		const timeOfDay = this.timeOfDaySelect?.value || "morning";
 		const weekType = this.weekTypeSelect?.value || "weekday";
 		const season = this.seasonSelect?.value || "summer";
 		const date = this.buildSearchDate();
 
-		// Leaflet מספק כלי נוח להמרה לריבוע סביב נקודה
-		const bounds = L.latLng(center.lat, center.lon).toBounds(
-			radiusKm * 1000
-		);
-		const sw = bounds.getSouthWest();
-		const ne = bounds.getNorthEast();
-		const bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`; // west,south,east,north
+		let bbox;
+		if (explicitBBox) {
+			// אם קיבלנו bbox מוכן (למשל מהריבוע שצוייר)
+			bbox = explicitBBox;
+		} else {
+			// חישוב ריבוע קטן סביב נקודה
+			const bounds = L.latLng(center.lat, center.lon).toBounds(
+				radiusKm * 1000
+			);
+			const sw = bounds.getSouthWest();
+			const ne = bounds.getNorthEast();
+			bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`;
+		}
 
 		const params = new URLSearchParams({
 			bbox,
@@ -979,9 +1144,6 @@ class PedestrianPredictionApp {
 		return data;
 	}
 
-	// -----------------------------
-	// Display
-	// -----------------------------
 	displayResults(data, cityName) {
 		// Show details panel
 		if (this.detailsPanel) {

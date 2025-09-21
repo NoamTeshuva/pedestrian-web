@@ -127,6 +127,32 @@ body {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
   background: #fff;
 }
+#clearBBoxBtn {
+  width: var(--btn-width, 96px);
+  min-width: var(--btn-width, 96px);
+  padding: 8px 12px;
+  border: 2px solid rgba(220, 53, 69, 0.6);
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(220, 53, 69, 0.85);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+#clearBBoxBtn:hover:not(:disabled) {
+  background: rgba(220, 53, 69, 1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+#clearBBoxBtn.invisible {
+  visibility: hidden;
+}
+#clearBBoxBtn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
 
 /* Select elements */
 .parameter-input {
