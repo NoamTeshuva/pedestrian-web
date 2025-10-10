@@ -45,6 +45,7 @@ from shapely.geometry import shape
 import sqlite3
 import textwrap
 import re
+from datetime import datetime, timedelta
 
 # Import the unified feature pipeline
 from feature_engineering.feature_pipeline import (
@@ -1163,6 +1164,89 @@ def predict():
             "details": str(e)
         }), 500
 
+@app.route("/predict-all", methods=["GET"])
+def predict_all():
+    try:
+        place = request.args.get("place")
+        bbox_str = request.args.get("bbox")
+        bbox = None
+        if bbox_str:
+            from .osm_tiles import validate_bbox
+            bbox = validate_bbox(bbox_str)
+
+        if not place and not bbox:
+            return jsonify({"error": "Must provide either 'place' or 'bbox'"}), 400
+
+        seasons = ["winter", "spring", "summer", "autumn"]
+        week_types = ["weekday", "weekend"]
+        times_of_day = ["morning", "afternoon", "evening", "night"]
+
+        layers = []
+        json_layers = []
+        for season in seasons:
+            for week_type in week_types:
+                for time_of_day in times_of_day:
+                    ts = build_search_timestamp(season, week_type, time_of_day)
+                    features_gdf, metadata = run_feature_pipeline(
+                        place=place, bbox=bbox, timestamp=ts
+                    )
+
+                    df_model = prepare_model_features(features_gdf)
+                    y_pred = model.predict(df_model)
+                    y_proba = model.predict_proba(df_model)
+
+                    gdf_out = features_gdf.copy()
+                    gdf_out["volume_bin"] = y_pred
+                    for i in range(y_proba.shape[1]):
+                        gdf_out[f"proba_{i+1}"] = y_proba[:, i]
+
+                    layer_name = f"{season}_{week_type}_{time_of_day}"
+                    layers.append({"name": layer_name, "gdf": gdf_out})
+
+                    json_layers.append({
+                        "name": layer_name,
+                        "geojson": gdf_out.to_json(),
+                        "feature_count": len(gdf_out),
+                        "is_prediction_layer": True
+                    })
+
+        # שמירה ל-GPKG אחד
+        gpkg_path = save_layers_to_gpkg(layers)
+
+        return jsonify({
+            "layers": json_layers,
+            "place": place,
+            "bbox": bbox,
+            "total_layers": len(json_layers),
+            "gpkg_file": gpkg_path
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/download-gpkg", methods=["GET"])
+def download_gpkg():
+    """
+    Download the last generated GPKG file.
+    Requires ?path=<gpkg_path> as query param.
+    """
+    try:
+        path = request.args.get("path")
+        if not path or not os.path.exists(path):
+            return jsonify({"error": "Invalid or missing GPKG path"}), 400
+
+        return send_file(
+            path,
+            mimetype="application/geopackage+sqlite3",
+            as_attachment=True,
+            download_name=os.path.basename(path),
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/predict-gpkg", methods=["GET"])
 def predict_gpkg():
@@ -2070,6 +2154,183 @@ def _create_gpkg_response(updated_gdf: gpd.GeoDataFrame,
         "prediction_stats": prediction_stats,
         "model_run": True
     }
+
+def build_search_timestamp(season: str, week_type: str, time_of_day: str) -> datetime:
+    """
+    Build a representative datetime for given season, week type, and time of day.
+    """
+    # חודש מייצג לעונה
+    season_months = {
+        "winter": 1,
+        "spring": 4,
+        "summer": 7,
+        "autumn": 10,
+    }
+    month = season_months.get(season, 6)
+
+    # יום מייצג
+    base_date = datetime(2025, month, 15)
+
+    # תיקון יום שבוע
+    weekday = base_date.weekday()
+    if week_type == "weekend":
+        # נקפוץ לשישי
+        days_ahead = (4 - weekday) % 7
+        base_date = base_date + timedelta(days=days_ahead)
+    else:
+        # אמצע שבוע → שלישי
+        days_ahead = (1 - weekday) % 7
+        base_date = base_date + timedelta(days=days_ahead)
+
+    # שעה מייצגת לזמן ביום
+    hours = {
+        "morning": 9,
+        "afternoon": 14,
+        "evening": 19,
+        "night": 2,
+    }
+    hour = hours.get(time_of_day, 12)
+
+    return datetime(base_date.year, base_date.month, base_date.day, hour, 0, 0)
+
+def save_layers_to_gpkg(layers, filename=None):
+    """
+    Save multiple prediction layers into a single GPKG file.
+    
+    Args:
+        layers: list of dicts with {name, gdf}
+        filename: optional custom filename
+    
+    Returns:
+        str: path to saved GPKG
+    """
+    if filename is None:
+        filename = "predictions.gpkg"
+
+    tmp_path = Path(tempfile.gettempdir()) / filename
+
+    # מחיקה אם קיים
+    if tmp_path.exists():
+        tmp_path.unlink()
+
+    for i, layer in enumerate(layers):
+        gdf = layer["gdf"]
+        layer_name = layer["name"]
+        gdf.to_file(tmp_path, layer=layer_name, driver="GPKG")
+
+    return str(tmp_path)
+
+
+@app.route("/predict-multi", methods=["GET"])
+def predict_multi():
+    """
+    Compute predictions for multiple time combinations in ONE pipeline run.
+
+    Query params:
+      - place or bbox (like /predict)
+      - seasons: csv of values in {winter,spring,summer,autumn}
+      - week_types: csv of values in {weekday,weekend}
+      - times_of_day: csv of values in {morning,afternoon,evening,night}
+
+    Returns:
+      { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox }
+    """
+    try:
+        place = request.args.get("place")
+        bbox_str = request.args.get("bbox")
+
+        # parse lists (fallback to defaults if not provided)
+        def _parse_csv(argval, default_list):
+            if argval is None or str(argval).strip() == "":
+                return list(default_list)
+            return [x.strip() for x in str(argval).split(",") if x.strip()]
+
+        seasons = _parse_csv(request.args.get("seasons"), ["winter", "spring", "summer", "autumn"])
+        week_types = _parse_csv(request.args.get("week_types"), ["weekday", "weekend"])
+        times_of_day = _parse_csv(request.args.get("times_of_day"), ["morning", "afternoon", "evening", "night"])
+
+        # validate basic params (place/bbox)
+        place, bbox, _ = validate_request_params(place, bbox_str, None)
+
+        # choose a representative timestamp (any valid combo) to build base features once
+        # we will override Hour/is_weekend/time_of_day later per combination
+        rep_ts = build_search_timestamp(seasons[0], week_types[0], times_of_day[0])
+
+        # run pipeline ONCE
+        features_gdf, pipeline_metadata = run_feature_pipeline(
+            place=place,
+            bbox=bbox,
+            timestamp=rep_ts.isoformat(),
+        )
+
+        if features_gdf is None or len(features_gdf) == 0:
+            return jsonify({"layers": [], "place": place, "bbox": bbox}), 200
+
+        layers = []
+
+        # prepare constant parts once
+        # note: prepare_model_features will be run for each overridden combo
+        for season in seasons:
+            for week_type in week_types:
+                for tod in times_of_day:
+                    # override time-based features on a copy
+                    gdf = features_gdf.copy()
+                    sp = parse_search_parameters({
+                        "season": season,
+                        "week_type": week_type,
+                        "time_of_day": tod,
+                    })
+                    gdf['Hour'] = sp['features']['Hour']
+                    gdf['is_weekend'] = sp['features']['is_weekend']
+                    gdf['time_of_day'] = sp['features']['time_of_day']
+
+                    # prepare and predict
+                    model_features = prepare_model_features(gdf)
+                    # Ensure categorical as strings
+                    for col in CAT_COLS:
+                        if col in model_features.columns:
+                            model_features[col] = model_features[col].astype(str)
+                    cat_feature_indices = [model_features.columns.get_loc(col) for col in CAT_COLS if col in model_features.columns]
+                    pool = Pool(model_features, cat_features=cat_feature_indices)
+
+                    y_pred = model.predict(pool)
+                    y_proba = model.predict_proba(pool)
+
+                    gdf_out = gdf.copy()
+                    gdf_out["volume_class"] = y_pred.astype(int)
+                    # add probabilities
+                    if hasattr(y_proba, 'ndim') and y_proba.ndim > 1:
+                        for i in range(y_proba.shape[1]):
+                            gdf_out[f"proba_{i+1}"] = y_proba[:, i]
+                        try:
+                            import numpy as _np
+                            gdf_out['proba_top'] = _np.asarray(y_proba).max(axis=1)
+                        except Exception:
+                            pass
+                    else:
+                        gdf_out['proba_1'] = y_proba
+
+                    layer_name = f"{season}_{week_type}_{tod}"
+                    # serialize to clean GeoJSON
+                    clean_data = clean_geojson(gdf_out.__geo_interface__)
+                    layers.append({
+                        "name": layer_name,
+                        "geojson": clean_data,
+                        "feature_count": int(len(gdf_out)),
+                        "is_prediction_layer": True,
+                    })
+
+        return json_response({
+            "layers": layers,
+            "place": place,
+            "bbox": bbox,
+            "total_layers": len(layers)
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 
 
 if __name__ == "__main__":
