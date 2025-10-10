@@ -1,142 +1,147 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
-	<head>
-		<meta charset="UTF-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>חיזוי נפח הולכי רגל</title>
-		<!-- Leaflet CSS -->
-		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
-				integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-		<!-- Custom CSS -->
-		<link rel="stylesheet" href="styles.css">
-	</head>
-	<body>
-	<!-- Full screen map -->
-		<div id="map" class="fullscreen-map"></div>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>חיזוי נפח הולכי רגל</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+            integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Leaflet Draw CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Full screen map -->
+    <div id="map" class="fullscreen-map"></div>
 
-	<!-- Top search bar -->
-		<div class="top-search-bar">
-			<div class="search-bar-content">
-				<h1>חיזוי נפח הולכי רגל</h1>
+    <!-- Right Search Panel -->
+    <div class="right-panel" id="searchPanel">
+        <div class="panel-header">
+            <h1>חיזוי נפח הולכי רגל</h1>
+            <button class="panel-collapse-btn" id="panelCollapseBtn">
+                <span class="collapse-icon">X</span>
+            </button>
+        </div>
+        
+        <div class="panel-content">
+            <!-- Row 1: City Search -->
+            <div class="panel-row">
+                <input 
+                    type="text"
+                    id="citySearchInput"
+                    placeholder="הזן שם עיר לחיפוש"
+                    class="city-input"
+                />
+                <button id="searchCityBtn" class="panel-btn primary-btn">
+                    <span id="searchCityBtnText"> חפש עיר</span>
+                    <span id="searchCitySpinner" class="spinner hidden">⌛</span>
+                </button>
+            </div>
 
-				<!-- Toolbar with two rows -->
-				<form id="searchForm" class="search-form toolbar">
-					<!-- Row 1: Parameters and file selection -->
-					<div class="toolbar-row parameters-row">
-						<!-- File selection button positioned to the left of time of day -->
-						<label class="file-btn">
-							<!-- File selection button positioned to the left of time of day -->
-							בחירת קובץ GPKG
-							<input id="gpkgInput" type="file" accept=".gpkg" />
-						</label>
-						<input 
-							type="text"
-							id="cityInput"
-							placeholder="הזן את שם העיר"
-							required
-							dir="ltr"
-						/>
+            <!-- Row 2: Local Navigation & BBox Tools -->
+            <div class="panel-row">
+                <button id="findCityBtn" class="panel-btn">
+                    מצא עיר (ללא שליחה)
+                </button>
+                <button id="drawBboxBtn" class="panel-btn">
+                    סמן אזור
+                </button>
+                <button id="clearBboxBtn" class="panel-btn danger-btn" disabled>
+                    מחק אזור
+                </button>
+            </div>
 
-						<select id="seasonSelect" class="parameter-input toolbar-input">
-							<option value="winter">חורף</option>
-							<option value="spring">אביב</option>
-							<option value="summer">קיץ</option>
-							<option value="autumn">סתיו</option>
-						</select>
+            <!-- Row 3: BBox Actions -->
+            <div class="panel-row">
+                <button id="sendBboxBtn" class="panel-btn primary-btn" disabled>
+                    <span id="sendBboxBtnText">שלח אזור מסומן</span>
+                    <span id="sendBboxSpinner" class="spinner hidden">⌛</span>
+                </button>
+            </div>
 
-						<select id="weekTypeSelect" class="parameter-input toolbar-input">
-							<option value="weekday">אמצע שבוע</option>
-							<option value="weekend">סוף שבוע</option>
-						</select>
+			<!-- Row 4: GPKG Upload -->
+            <div class="panel-row">
+                <label class="file-btn">
+                    בחר קובץ GPKG
+                    <input id="gpkgFileInput" type="file" accept=".gpkg" />
+                </label>
+                <button id="uploadGpkgBtn" class="panel-btn" disabled>
+                    <span id="uploadGpkgBtnText">שלח קובץ</span>
+                    <span id="uploadGpkgSpinner" class="spinner hidden">⌛</span>
+                </button>
+            </div>
 
-						<select id="timeOfDaySelect" class="parameter-input toolbar-input">
-							<option value="morning">בוקר (6–12)</option>
-							<option value="afternoon">צהריים (12–18)</option>
-							<option value="evening">ערב (18–22)</option>
-							<option value="night">לילה (22–6)</option>
-						</select>
+            <!-- Progress Section (shown during batch processing) -->
+            <div id="progressSection" class="progress-section hidden">
+                <h3>מעבד חיזויים...</h3>
+                <div class="progress-bar">
+                    <div id="progressBar" class="progress-fill"></div>
+                </div>
+                <div id="progressText" class="progress-text">0 / 32</div>
+            </div>
 
-					</div>
+            <!-- Layer Selection (shown after data loaded) -->
+            <div id="layerSelectionSection" class="layer-selection hidden">
+                <h3>בחר שכבה להצגה:</h3>
+                <div id="layerButtonsContainer" class="layer-buttons"></div>
+            </div>
 
-					<!-- Row 2: Action buttons -->
-					<div class="toolbar-row actions-row">
-						<!-- Left side: Send file button -->
-						<div class="file-send-wrapper">
-							<button type="button" id="sendGpkgBtn" class="send-file-btn" disabled>שלח קובץ</button>
-						</div>
-						
-						<!-- Center: Search and Download buttons -->
-						<div class="center-buttons">
-							<button type="submit" id="searchBtn" class="toolbar-btn">
-								<span id="buttonText">חיפוש</span>
-								<span id="loadingSpinner" class="spinner hidden">⌛</span>
-							</button>
-							<button type="button" id="clearBBoxBtn" class="toolbar-btn invisible">
-								מחק ריבוע
-							</button>
-							<button type="button" id="downloadGpkgBtn" class="download-gpkg-btn toolbar-btn invisible">
-								<span id="downloadBtnText">הורד GPKG</span>
-								<span id="downloadLoadingSpinner" class="spinner hidden">⌛</span>
-							</button>
-						</div>
-					</div>
-				</form>
+            <!-- Download Section (shown after data loaded) -->
+            <div id="downloadSection" class="download-section hidden">
+                <button id="downloadGpkgBtn" class="panel-btn success-btn">
+                    <span id="downloadBtnText">הורד GPKG עם כל השכבות</span>
+                    <span id="downloadSpinner" class="spinner hidden">⌛</span>
+                </button>
+            </div>
 
-				<div id="statusMessage" class="inline-status-message hidden"></div>
-			</div>
-		</div>
+            <!-- Status Messages -->
+            <div id="statusMessage" class="status-message hidden"></div>
+        </div>
+    </div>
 
-	<!-- Loading message -->
-	<div id="loadingMessage" class="loading-message hidden">
-		<div class="inline-loading-message">
-			<span class="spinner">⌛</span>
-			<span>מעבד נתונים...</span>
-		</div>
-	</div>
+    <!-- Floating Details Panel -->
+    <div id="detailsPanel" class="floating-panel details-panel hidden">
+        <div class="panel-header">
+            <h3>פרטי תחזית</h3>
+            <button class="panel-toggle" id="detailsPanelToggle">
+                <span class="toggle-icon">−</span>
+            </button>
+        </div>
+        <div class="panel-content" id="detailsPanelContent">
+            <div id="predictionDetails" class="prediction-details"></div>
+        </div>
+    </div>
 
-	<!-- Floating details panel -->
-	<div id="detailsPanel" class="floating-panel details-panel hidden">
-		<div class="panel-header">
-		<h3>פרטי תחזית</h3>
-		<button class="panel-toggle" id="detailsPanelToggle">
-			<span class="toggle-icon">−</span>
-		</button>
-		</div>
-		<div class="panel-content" id="detailsPanelContent">
-		<div id="predictionDetails" class="prediction-details"></div>
-		</div>
-	</div>
+    <!-- Floating Legend -->
+    <div class="floating-legend">
+        <h4>מקרא:</h4>
+        <div id="legendItems"></div>
+    </div>
 
-	<!-- Floating legend -->
-	<div class="floating-legend">
-		<h4>מקרא:</h4>
-		<div id="legendItems"></div>
-	</div>
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Leaflet Draw -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    
+    <!-- API base resolver -->
+    <script>
+        (function () {
+            const url = new URL(window.location.href);
+            const fromQuery = url.searchParams.get('api');
+            if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
 
-	<!-- Leaflet JavaScript -->
-	<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
-			integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+            const ls = localStorage.getItem('API_BASE');
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-	<!-- Leaflet Draw -->
-	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+            window.API_BASE = ls || (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
+            console.log('[API_BASE]', window.API_BASE);
+        })();
+    </script>
 
-	<!-- API base resolver -->
-	<script>
-		(function () {
-		const url = new URL(window.location.href);
-		const fromQuery = url.searchParams.get('api');
-		if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
-
-		const ls = localStorage.getItem('API_BASE');
-		const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-
-		window.API_BASE = ls || (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
-		console.log('[API_BASE]', window.API_BASE);
-		})();
-	</script>
-
-	<!-- Custom JavaScript -->
-	<script src="script.js" defer></script>
-	</body>
+    <!-- Custom JavaScript -->
+    <script src="script.js" defer></script>
+</body>
 </html>

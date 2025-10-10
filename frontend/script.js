@@ -1,370 +1,165 @@
-// script.js - Full Screen Map Application with Fixed GPKG Upload
+// script.js - Pedestrian Volume Prediction Application with Enhanced Features
 
-function bboxFromLeafletMap(map) {
-	if (!map) return null;
-	const b = map.getBounds();
-	const sw = b.getSouthWest(),
-		ne = b.getNorthEast();
-	return { west: sw.lng, south: sw.lat, east: ne.lng, north: ne.lat };
-}
-
-function smallBBoxAround(lat, lon, radiusKm = 3) {
-	const b = L.latLng(lat, lon).toBounds(radiusKm * 1000);
-	const sw = b.getSouthWest(),
-		ne = b.getNorthEast();
-	return { west: sw.lng, south: sw.lat, east: ne.lng, north: ne.lat };
-}
-
-// מדרג תוצאות Nominatim: מעדיפים ישויות ייישוביות (city/town/village/hamlet/suburb/neighbourhood)
-// ושמים בונוס אם country_code תואם לרמז מדינה אחרון (אם יש).
-function pickBestGeocode(results, countryHint = null) {
-	if (!Array.isArray(results) || !results.length) return null;
-
-	const typeScore = {
-		city: 100,
-		town: 90,
-		village: 80,
-		hamlet: 70,
-		suburb: 60,
-		neighbourhood: 50,
-		municipality: 45,
-		county: 20,
-		state: 10,
-		country: 0,
-	};
-
-	return results
-		.map((r) => {
-			const t = (r.type || "").toLowerCase();
-			const cls = (r.class || "").toLowerCase();
-			let score = typeScore[t] ?? 40;
-			if (cls === "place") score += 10;
-			if (
-				countryHint &&
-				r.address?.country_code?.toLowerCase() ===
-					countryHint.toLowerCase()
-			) {
-				score += 20;
-			}
-			// חשיבות של Nominatim (float) – מוסיפים מעט
-			const imp = Number(r.importance ?? 0);
-			score += Math.min(imp * 10, 10);
-			return { r, score };
-		})
-		.sort((a, b) => b.score - a.score)
-		.map((x) => x.r)[0];
-}
-
-function normalizeBBoxFromLoc(loc, fallbackCenter) {
-	// loc.boundingbox בפורמט [south, north, west, east] ב-jsonv2
-	const bb = loc?.boundingbox || [];
-	const south = parseFloat(bb[0]),
-		north = parseFloat(bb[1]);
-	const west = parseFloat(bb[2]),
-		east = parseFloat(bb[3]);
-
-	// אם חסר/לא מספרים – קופצים לבוקס קטן סביב המרכז
-	const lat = parseFloat(loc?.lat);
-	const lon = parseFloat(loc?.lon);
-	if (![south, north, west, east].every(Number.isFinite)) {
-		if (Number.isFinite(lat) && Number.isFinite(lon)) {
-			return smallBBoxAround(lat, lon, 3);
-		}
-		if (fallbackCenter)
-			return smallBBoxAround(fallbackCenter.lat, fallbackCenter.lon, 3);
-		return null;
-	}
-
-	// אם ה-BBOX ענק (למשל מדינה שלמה) – מכווצים ל-3 ק"מ סביב המרכז
-	const areaDeg2 = Math.abs((east - west) * (north - south));
-	if (areaDeg2 > 1.0) {
-		// בערך "גדול מדי"
-		if (Number.isFinite(lat) && Number.isFinite(lon)) {
-			return smallBBoxAround(lat, lon, 3);
-		}
-	}
-	return { west, south, east, north };
-}
-
+/**
+ * Main application class for pedestrian volume prediction
+ * Manages the entire application lifecycle including map, UI, and data
+ */
 class PedestrianPredictionApp {
 	constructor() {
 		this.API_BASE_URL = window.API_BASE || "http://127.0.0.1:8000";
 		console.log("[PedestrianPredictionApp] Using API:", this.API_BASE_URL);
 
+		// Application state
 		this.map = null;
-		this.currentLayer = null;
-		this._inFlight = false;
-		this.selectedFile = null; // ✓ הוספת selectedFile לקונסטרקטור
+		this.currentLayers = {}; // Store multiple layers
+		this.currentLayerName = null; // Currently visible layer
+		this.allLayersData = []; // Store all layers from server
+		this.drawnBbox = null; // Store drawn bbox
+		this.selectedFile = null;
+		this.isProcessing = false;
+		this.currentGpkgBlob = null;
 
+		// Progress tracking
+		this.totalRequests = 32; // 4 seasons * 2 week types * 4 times of day
+		this.completedRequests = 0;
+
+		// Initialize components
 		this.initializeElements();
-		this.setDefaultSearchParameters();
 		this.initializeEventListeners();
 		this.initializeMap();
-		this.updateLegend();
-		this.initializePanelToggles();
-		this.lastGeocodeCenter = null;
-		this.lastGeocodeBBox = null;
-		this.lastCountryHint = null; // נשמר מהתוצאה האחרונה, לא מחייב ישראל
+		this.initializeLegend();
 	}
 
-	// -----------------------------
-	// DOM Elements & UI
-	// -----------------------------
+	/**
+	 * Initialize all DOM element references
+	 */
 	initializeElements() {
-		this.searchForm = document.getElementById("searchForm");
-		this.cityInput = document.getElementById("cityInput");
-		this.searchBtn = document.getElementById("searchBtn");
-		this.buttonText = document.getElementById("buttonText");
-		this.loadingSpinner = document.getElementById("loadingSpinner");
-		this.statusMessage = document.getElementById("statusMessage");
-		this.loadingMessage = document.getElementById("loadingMessage");
-		this.predictionDetails = document.getElementById("predictionDetails");
+		// Panel elements
+		this.searchPanel = document.getElementById("searchPanel");
+		this.panelCollapseBtn = document.getElementById("panelCollapseBtn");
 
-		// Panels
-		this.detailsPanel = document.getElementById("detailsPanel");
-		this.parametersPanel = document.getElementById("parametersPanel");
+		// City search elements
+		this.citySearchInput = document.getElementById("citySearchInput");
+		this.searchCityBtn = document.getElementById("searchCityBtn");
+		this.searchCityBtnText = document.getElementById("searchCityBtnText");
+		this.searchCitySpinner = document.getElementById("searchCitySpinner");
 
-		// Download GPKG button elements
-		this.downloadGpkgBtn = document.getElementById("downloadGpkgBtn");
-		this.downloadBtnText = document.getElementById("downloadBtnText");
-		this.downloadLoadingSpinner = document.getElementById(
-			"downloadLoadingSpinner"
+		// GPKG upload elements
+		this.gpkgFileInput = document.getElementById("gpkgFileInput");
+		this.uploadGpkgBtn = document.getElementById("uploadGpkgBtn");
+		this.uploadGpkgBtnText = document.getElementById("uploadGpkgBtnText");
+		this.uploadGpkgSpinner = document.getElementById("uploadGpkgSpinner");
+
+		// Local navigation and bbox elements
+		this.findCityBtn = document.getElementById("findCityBtn");
+		this.drawBboxBtn = document.getElementById("drawBboxBtn");
+		this.clearBboxBtn = document.getElementById("clearBboxBtn");
+		this.sendBboxBtn = document.getElementById("sendBboxBtn");
+		this.sendBboxBtnText = document.getElementById("sendBboxBtnText");
+		this.sendBboxSpinner = document.getElementById("sendBboxSpinner");
+
+		// Progress section
+		this.progressSection = document.getElementById("progressSection");
+		this.progressBar = document.getElementById("progressBar");
+		this.progressText = document.getElementById("progressText");
+
+		// Layer selection elements
+		this.layerSelectionSection = document.getElementById(
+			"layerSelectionSection"
+		);
+		this.layerButtonsContainer = document.getElementById(
+			"layerButtonsContainer"
 		);
 
-		// Search parameter elements
-		this.seasonSelect = document.getElementById("seasonSelect");
-		this.weekTypeSelect = document.getElementById("weekTypeSelect");
-		this.timeOfDaySelect = document.getElementById("timeOfDaySelect");
+		// Download elements
+		this.downloadSection = document.getElementById("downloadSection");
+		this.downloadGpkgBtn = document.getElementById("downloadGpkgBtn");
+		this.downloadBtnText = document.getElementById("downloadBtnText");
+		this.downloadSpinner = document.getElementById("downloadSpinner");
 
-		// Panel toggles
-		this.parametersToggle = document.getElementById("parametersToggle");
-		this.parametersClose = document.getElementById("parametersClose");
+		// Status and details
+		this.statusMessage = document.getElementById("statusMessage");
+		this.detailsPanel = document.getElementById("detailsPanel");
 		this.detailsPanelToggle = document.getElementById("detailsPanelToggle");
 		this.detailsPanelContent = document.getElementById(
 			"detailsPanelContent"
 		);
-
-		// GPKG upload elements
-		this.gpkgInput = document.getElementById("gpkgInput");
-		this.sendGpkgBtn = document.getElementById("sendGpkgBtn");
-		this.clearBBoxBtn = document.getElementById("clearBBoxBtn");
+		this.predictionDetails = document.getElementById("predictionDetails");
 	}
 
-	initializePanelToggles() {
-		// Parameters panel toggle
-		if (this.parametersToggle) {
-			this.parametersToggle.addEventListener("click", () => {
-				this.parametersPanel.classList.toggle("hidden");
-			});
-		}
+	/**
+	 * Initialize all event listeners for UI interactions
+	 */
+	initializeEventListeners() {
+		// Panel collapse/expand
+		this.panelCollapseBtn.addEventListener("click", () =>
+			this.togglePanelCollapse()
+		);
 
-		if (this.parametersClose) {
-			this.parametersClose.addEventListener("click", () => {
-				this.parametersPanel.classList.add("hidden");
-			});
-		}
+		// City search
+		this.searchCityBtn.addEventListener("click", () =>
+			this.handleCitySearchAndSendToServerForPredictions()
+		);
+		this.citySearchInput.addEventListener("keypress", (e) => {
+			if (e.key === "Enter")
+				this.handleCitySearchAndSendToServerForPredictions();
+		});
+
+		// GPKG upload
+		this.gpkgFileInput.addEventListener("change", () =>
+			this.handleFileSelection()
+		);
+		this.uploadGpkgBtn.addEventListener("click", () =>
+			this.handleGpkgUpload()
+		);
+
+		// Local navigation and bbox
+		this.findCityBtn.addEventListener("click", () => this.handleFindCity());
+		this.drawBboxBtn.addEventListener("click", () =>
+			this.enableBboxDrawing()
+		);
+		this.clearBboxBtn.addEventListener("click", () => this.clearBbox());
+		this.sendBboxBtn.addEventListener("click", () => this.handleSendBbox());
+
+		// Download
+		this.downloadGpkgBtn.addEventListener("click", () =>
+			this.handleDownloadGpkg()
+		);
 
 		// Details panel toggle
-		if (this.detailsPanelToggle) {
-			this.detailsPanelToggle.addEventListener("click", () => {
-				this.togglePanel("details");
-			});
-		}
+		this.detailsPanelToggle.addEventListener("click", () =>
+			this.toggleDetailsPanel()
+		);
 	}
 
-	togglePanel(panelName) {
-		if (
-			panelName === "details" &&
-			this.detailsPanelContent &&
-			this.detailsPanelToggle
-		) {
-			this.detailsPanelContent.classList.toggle("collapsed");
-			const icon = this.detailsPanelToggle.querySelector(".toggle-icon");
-			if (icon) {
-				icon.textContent = this.detailsPanelContent.classList.contains(
-					"collapsed"
-				)
-					? "+"
-					: "−";
-			}
-		}
+	/**
+	 * Initialize Leaflet map with Israeli coordinates
+	 */
+	initializeMap() {
+		// Create map centered on Israel
+		this.map = L.map("map").setView([31.5, 35.0], 8);
+
+		// Add OpenStreetMap tile layer
+		L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+			attribution:
+				'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+			maxZoom: 19,
+			subdomains: ["a", "b", "c"],
+		}).addTo(this.map);
+
+		// Initialize drawing tools
+		this.initializeDrawingTools();
 	}
 
-	// -----------------------------
-	// Defaults
-	// -----------------------------
-	setDefaultSearchParameters() {
-		const now = new Date();
-
-		// Set default season based on Israeli seasons
-		const currentSeason = this.getCurrentSeason(now);
-		if (this.seasonSelect) this.seasonSelect.value = currentSeason;
-
-		// Set default week type
-		const isWeekend = this.isIsraeliWeekend(now);
-		if (this.weekTypeSelect)
-			this.weekTypeSelect.value = isWeekend ? "weekend" : "weekday";
-
-		// Set default time of day
-		const currentTimeOfDay = this.getCurrentTimeOfDay(now);
-		if (this.timeOfDaySelect) this.timeOfDaySelect.value = currentTimeOfDay;
-	}
-
-	getCurrentSeason(date) {
-		const month = date.getMonth() + 1;
-		if (month === 12 || month <= 2) return "winter";
-		if (month >= 3 && month <= 5) return "spring";
-		if (month >= 6 && month <= 8) return "summer";
-		return "autumn";
-	}
-
-	// In JS getDay(): 0=Sunday ... 6=Saturday.
-	// כאן weekend מוגדר חמישי-שבת (4–6) כפי שביקשת בעבר.
-	isIsraeliWeekend(date) {
-		const day = date.getDay();
-		return day === 4 || day === 5 || day === 6;
-	}
-
-	getCurrentTimeOfDay(date) {
-		const hour = date.getHours();
-		if (hour >= 5 && hour < 12) return "morning";
-		if (hour >= 12 && hour < 17) return "afternoon";
-		if (hour >= 17 && hour < 21) return "evening";
-		return "night";
-	}
-
-	getHourFromTimeOfDay(timeOfDay) {
-		const defaultHours = {
-			morning: 8,
-			afternoon: 14,
-			evening: 20,
-			night: 2,
-		};
-		return defaultHours[timeOfDay] || 8;
-	}
-
-	// -----------------------------
-	// Events
-	// -----------------------------
-	initializeEventListeners() {
-		if (this.searchForm) {
-			this.searchForm.addEventListener("submit", (e) =>
-				this.handleSearch(e)
-			);
-		}
-
-		if (this.cityInput) {
-			// Clear error messages when user starts typing
-			this.cityInput.addEventListener("input", () => {
-				if (
-					!this.statusMessage.classList.contains("hidden") &&
-					this.statusMessage.classList.contains("error")
-				) {
-					this.hideStatusMessage();
-				}
-			});
-
-			// Allow Enter key in city input
-			this.cityInput.addEventListener("keypress", (e) => {
-				if (e.key === "Enter") {
-					e.preventDefault();
-					this.handleSearch(e);
-				}
-			});
-		}
-
-		// ✓ אירוע חדש להעלאת קובץ GPKG - מתוקן
-		if (this.gpkgInput) {
-			this.gpkgInput.addEventListener("change", () => {
-				this.selectedFile = this.gpkgInput.files?.[0] || null;
-				if (this.sendGpkgBtn) {
-					this.sendGpkgBtn.disabled = !this.selectedFile;
-				}
-				this.cityInput.value = "";
-				// ✓ ולידציה בסיסית של הקובץ
-				if (this.selectedFile) {
-					this.validateGpkgFile(this.selectedFile);
-				}
-				this.showDownloadButton(false);
-			});
-		}
-
-		if (this.sendGpkgBtn) {
-			this.sendGpkgBtn.addEventListener("click", () =>
-				this.handleGpkgUpload()
-			);
-		}
-
-		// Download GPKG button
-		if (this.downloadGpkgBtn) {
-			this.downloadGpkgBtn.addEventListener("click", () =>
-				this.handleDownloadGpkg()
-			);
-		}
-		if (this.clearBBoxBtn) {
-			this.clearBBoxBtn.addEventListener("click", () => {
-				// הסרת ריבוע
-				if (this.drawnItems) {
-					this.drawnItems.clearLayers();
-				}
-				// הסרת שכבה נוכחית
-				if (this.currentLayer) {
-					this.map.removeLayer(this.currentLayer);
-					this.currentLayer = null;
-				}
-				// איפוס חיפוש
-				if (this.cityInput) {
-					this.cityInput.value = "";
-				}
-				// החזרת כפתור למצב מוסתר
-				this.clearBBoxBtn.classList.add("invisible");
-
-				this.showStatusMessage(
-					"הריבוע נמחק. אפשר לחפש עיר מחדש.",
-					"success"
-				);
-			});
-		}
-	}
-
-	// ✓ ולידציה חדשה לקובץ GPKG
-	validateGpkgFile(file) {
-		const errors = [];
-
-		// בדיקת סיומת קובץ
-		if (!file.name.toLowerCase().endsWith(".gpkg")) {
-			errors.push("הקובץ חייב להיות בפורמט GPKG");
-		}
-
-		// בדיקת גודל קובץ (מקסימום 50MB)
-		const maxSize = 50 * 1024 * 1024; // 50MB
-		if (file.size > maxSize) {
-			errors.push("גודל הקובץ גדול מדי (מקסימום 50MB)");
-		}
-
-		// בדיקת גודל מינימלי
-		if (file.size < 1024) {
-			// 1KB מינימום
-			errors.push("הקובץ קטן מדי - ייתכן שהוא פגום");
-		}
-
-		if (errors.length > 0) {
-			this.showStatusMessage(errors.join(", "), "error");
-			if (this.sendGpkgBtn) {
-				this.sendGpkgBtn.disabled = true;
-			}
-			return false;
-		}
-
-		return true;
-	}
-
+	/**
+	 * Initialize Leaflet Draw plugin for bbox selection
+	 */
 	initializeDrawingTools() {
-		// יצירת FeatureGroup לאחסון צורות
+		// Create FeatureGroup for drawn items
 		this.drawnItems = new L.FeatureGroup();
 		this.map.addLayer(this.drawnItems);
 
-		// הגדרת בקרת ציור (רק מלבן)
+		// Create draw control (initially disabled)
 		this.drawControl = new L.Control.Draw({
 			draw: {
 				polygon: false,
@@ -372,918 +167,34 @@ class PedestrianPredictionApp {
 				circle: false,
 				marker: false,
 				circlemarker: false,
-				rectangle: {
-					shapeOptions: {
-						color: "#ff7800",
-						weight: 2,
-					},
-				},
+				rectangle: false, // Will enable programmatically
 			},
 			edit: {
 				featureGroup: this.drawnItems,
 				edit: false,
-				remove: true,
+				remove: false,
 			},
 		});
-		this.map.addControl(this.drawControl);
-
-		// אירוע ציור ריבוע
-		this.map.on(L.Draw.Event.CREATED, (e) => {
-			if (e.layerType === "rectangle") {
-				// מסיר ריבועים ושכבות קודמות
-				this.drawnItems.clearLayers();
-				if (this.currentLayer) {
-					this.map.removeLayer(this.currentLayer);
-					this.currentLayer = null;
-				}
-
-				const layer = e.layer;
-				this.drawnItems.addLayer(layer);
-				if (this.clearBBoxBtn) {
-					this.clearBBoxBtn.classList.remove("invisible");
-				}
-
-				// איפוס תיבת החיפוש
-				if (this.cityInput) {
-					this.cityInput.value = "";
-				}
-
-				// חשיפת כפתור מחיקת ריבוע
-				if (this.clearBBoxBtn) {
-					this.clearBBoxBtn.classList.remove("invisible");
-				}
-
-				// המרת ריבוע ל־BBox
-				const bounds = layer.getBounds();
-				const sw = bounds.getSouthWest();
-				const ne = bounds.getNorthEast();
-				const bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`;
-
-				console.log("[BBox]", bbox);
-
-				// שליחת bbox לשרת
-				this.fetchPredictionsByBBox(
-					{ lat: (sw.lat + ne.lat) / 2, lon: (sw.lng + ne.lng) / 2 },
-					null,
-					bbox
-				)
-					.then((data) => {
-						this.displayResults(data, "BBox בחירה");
-						this.showDownloadButton(true);
-					})
-					.catch((err) => {
-						console.error("BBox fetch error:", err);
-						this.showStatusMessage(
-							"שגיאה בהרצת חיזוי על הריבוע",
-							"error"
-						);
-					});
-			}
-		});
 	}
 
-	// -----------------------------
-	// Map
-	// -----------------------------
-	initializeMap() {
-		// Create map centered on Israel
-		this.map = L.map("map").setView([31.5, 35.0], 8);
-
-		// Add OpenStreetMap tile layer for better street visibility
-		L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-			attribution:
-				'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-			maxZoom: 19,
-			subdomains: ["a", "b", "c"],
-		}).addTo(this.map);
-		// הוספת כלי ציור
-		this.initializeDrawingTools();
-	}
-
-	// -----------------------------
-	// Search & Fetch
-	// -----------------------------
-	buildSearchDate() {
-		const timeOfDay = this.timeOfDaySelect?.value || "morning";
-		const weekType = this.weekTypeSelect?.value || "weekday";
-		const hour = this.getHourFromTimeOfDay(timeOfDay);
-
-		// Create a date object representing the search parameters
-		let searchDate = new Date();
-
-		// Adjust to correct day of week if needed
-		searchDate = this.apply_week_type_to_datetime(searchDate, weekType);
-
-		// Set the hour
-		searchDate.setHours(hour, 0, 0, 0);
-
-		return searchDate.toISOString();
-	}
-
-	apply_week_type_to_datetime(dt, weekType) {
-		const currentIsWeekend = this.isIsraeliWeekend(dt);
-		const targetIsWeekend = weekType === "weekend";
-
-		if (currentIsWeekend === targetIsWeekend) {
-			return dt;
-		}
-
-		// Find next appropriate day
-		let daysAhead = 0;
-		for (let i = 1; i <= 7; i++) {
-			const testDate = new Date(dt.getTime() + i * 24 * 60 * 60 * 1000);
-			if (this.isIsraeliWeekend(testDate) === targetIsWeekend) {
-				daysAhead = i;
-				break;
-			}
-		}
-		return new Date(dt.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-	}
-
-	async handleGpkgUpload() {
-		this.showDownloadButton(false);
-		this.lastPlaceName = null; // איפוס שם המקום האחרון
-		if (!this.selectedFile) {
-			this.showStatusMessage("בחר קובץ GPKG קודם", "error");
-			return;
-		}
-
-		// ולידציה נוספת לפני שליחה
-		if (!this.validateGpkgFile(this.selectedFile)) {
-			return; // הודעת השגיאה כבר הוצגה
-		}
-
-		try {
-			this.setLoading(true);
-			this.showStatusMessage(
-				"מעלה וקורא קובץ GPKG, מריץ חיזוי...",
-				"info"
-			);
-			this.showDownloadButton(false);
-
-			// שליחת הקובץ לשרת
-			const formData = new FormData();
-			formData.append("file", this.selectedFile);
-
-			const response = await fetch(`${this.API_BASE_URL}/read-gpkg`, {
-				method: "POST",
-				body: formData,
-			});
-
-			if (!response.ok) {
-				let errorMessage;
-				try {
-					const errorData = await response.json();
-					errorMessage =
-						errorData.error || `שגיאת שרת: ${response.status}`;
-				} catch {
-					errorMessage = `שגיאת שרת: ${response.status} ${response.statusText}`;
-				}
-				throw new Error(errorMessage);
-			}
-
-			const result = await response.json();
-
-			// ✓ בדיקה שהתקבלו נתונים תקינים
-			if (
-				!result.layers ||
-				!Array.isArray(result.layers) ||
-				result.layers.length === 0
-			) {
-				throw new Error("הקובץ לא מכיל שכבות תקינות עם גיאומטריה");
-			}
-
-			// ✓ הצגת הנתונים על המפה (כולל תוצאות חיזוי חדשות)
-			await this.displayGpkgPredictionResults(result);
-
-			// הודעת הצלחה מותאמת לחיזוי
-			let message = `קובץ נטען בהצלחה - ${result.layers.length} שכבות`;
-			if (result.model_run && result.prediction_stats) {
-				message += `, חיזוי הופעל עבור ${result.prediction_stats.total_edges} רחובות`;
-			}
-
-			this.showStatusMessage(message, "success");
-		} catch (error) {
-			console.error("GPKG upload error:", error);
-			this.showStatusMessage(
-				`שגיאה בקריאת קובץ: ${error.message}`,
-				"error"
-			);
-		} finally {
-			this.setLoading(false);
-		}
-	}
-
-	// ✓ פונקציה מעודכנת להצגת תוצאות GPKG עם חיזוי
-	async displayGpkgPredictionResults(result) {
-		// מסיר שכבה קיימת
-		if (this.currentLayer) {
-			this.map.removeLayer(this.currentLayer);
-		}
-		// this.showDownloadButton(true);
-		const layerGroup = L.featureGroup();
-
-		// מוסיף כל שכבה עם טיפול מיוחד בשכבת החיזוי
-		for (const layer of result.layers) {
-			if (
-				layer.geojson &&
-				layer.geojson.features &&
-				layer.geojson.features.length > 0
-			) {
-				const geoJsonLayer = L.geoJSON(layer.geojson, {
-					style: (feature) => {
-						if (layer.is_prediction_layer) {
-							// עיצוב כמו בחיפוש רגיל לשכבת החיזוי
-							return this.getFeatureStyle(feature);
-						} else {
-							// עיצוב כללי לשכבות אחרות
-							return {
-								color: this.getGpkgLayerColor(layer.name),
-								weight: 3,
-								opacity: 0.8,
-							};
-						}
-					},
-					onEachFeature: (feature, leafletLayer) => {
-						if (layer.is_prediction_layer) {
-							// פופ-אפ כמו בחיפוש רגיל
-							this.bindFeaturePopup(feature, leafletLayer);
-						} else {
-							// פופ-אפ כללי
-							this.bindGpkgPopup(
-								feature,
-								leafletLayer,
-								layer.name
-							);
-						}
-					},
-				});
-				geoJsonLayer.addTo(layerGroup);
-			}
-		}
-
-		if (layerGroup.getLayers().length > 0) {
-			layerGroup.addTo(this.map);
-			this.currentLayer = layerGroup;
-
-			// התאמת תחום המפה
-			if (result.bbox && result.bbox.length === 4) {
-				const [west, south, east, north] = result.bbox;
-				this.map.fitBounds(
-					[
-						[south, west],
-						[north, east],
-					],
-					{ padding: [20, 20] }
-				);
-			} else {
-				this.map.fitBounds(layerGroup.getBounds(), {
-					padding: [20, 20],
-				});
-			}
-		}
-
-		// ✓ עדכון פאנל הפרטים עם מידע על החיזוי
-		this.displayGpkgPredictionDetails(result);
-
-		// הצגת כפתור הורדה אם יש תוצאות חיזוי
-		if (result.model_run) {
-			// this.showDownloadButton(true);
-			this.lastPlaceName =
-				this.cityInput.value || this.selectedFile?.name || "gpkg";
-		} else {
-			this.showDownloadButton(false);
-		}
-	}
-
-	// ✓ צבעים לשכבות GPKG שונות
-	getGpkgLayerColor(layerName) {
-		const colors = ["#2E8B57", "#4682B4", "#CD853F", "#9932CC", "#FF6347"];
-		let hash = 0;
-		for (let i = 0; i < layerName.length; i++) {
-			hash = layerName.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		return colors[Math.abs(hash) % colors.length];
-	}
-
-	// ✓ פופ-אפ לפיצ'רים של GPKG
-	bindGpkgPopup(feature, layer, layerName) {
-		const props = feature.properties || {};
-
-		let popupContent = `
-			<div style="direction: rtl; text-align: right; min-width: 200px;">
-				<h3 style="margin: 0 0 10px 0; color: #333;">${layerName}</h3>
-				<div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
-		`;
-
-		// הצגת מאפיינים
-		Object.entries(props).forEach(([key, value]) => {
-			if (value !== null && value !== undefined && value !== "") {
-				popupContent += `
-					<p style="margin: 3px 0;">
-						<strong>${key}:</strong> ${value}
-					</p>
-				`;
-			}
-		});
-
-		popupContent += "</div></div>";
-
-		layer.bindPopup(popupContent, {
-			maxWidth: 300,
-			className: "custom-popup",
-		});
-	}
-
-	// ✓ עדכון פאנל פרטים עבור GPKG עם חיזוי
-	displayGpkgPredictionDetails(result) {
-		if (this.detailsPanel) {
-			this.detailsPanel.classList.remove("hidden");
-		}
-
-		let totalFeatures = 0;
-		const layerSummary = result.layers
-			.map((layer) => {
-				totalFeatures += layer.feature_count || 0;
-				let suffix = "";
-				if (layer.is_prediction_layer) {
-					suffix = " (שכבת חיזוי)";
-				}
-				return `${layer.name}${suffix}: ${
-					layer.feature_count || 0
-				} פיצ'רים`;
-			})
-			.join("<br>");
-
-		// חישוב סטטיסטיקות חיזוי
-		let predictionSummary = "";
-		if (
-			result.prediction_stats &&
-			result.prediction_stats.volume_distribution
-		) {
-			const dist = result.prediction_stats.volume_distribution;
-			const sortedLevels = Object.keys(dist)
-				.sort()
-				.map((level) => {
-					const count = dist[level];
-					const percentage = (
-						(count / result.prediction_stats.total_edges) *
-						100
-					).toFixed(1);
-					return `רמה ${level}: ${count} רחובות (${percentage}%)`;
-				});
-			predictionSummary = `<br><strong>התפלגות עומס חזוי:</strong><br>${sortedLevels.join(
-				"<br>"
-			)}`;
-		}
-
-		if (this.predictionDetails) {
-			this.predictionDetails.innerHTML = `
-				<div class="detail-item">
-					<div class="detail-label">קובץ GPKG</div>
-					<div class="detail-value highlight">${
-						this.selectedFile?.name || "לא ידוע"
-					}</div>
-				</div>
-
-				<div class="detail-item">
-					<div class="detail-label">מספר שכבות</div>
-					<div class="detail-value">${result.layers.length}</div>
-				</div>
-
-				<div class="detail-item">
-					<div class="detail-label">סה"כ פיצ'רים</div>
-					<div class="detail-value">${totalFeatures}</div>
-				</div>
-
-				${
-					result.model_run
-						? `
-				<div class="detail-item">
-					<div class="detail-label">חיזוי הופעל</div>
-					<div class="detail-value highlight">✓ כן</div>
-				</div>
-
-				<div class="detail-item">
-					<div class="detail-label">רחובות שנותחו</div>
-					<div class="detail-value">${result.prediction_stats?.total_edges || 0}</div>
-				</div>
-
-				${
-					result.prediction_stats?.avg_confidence
-						? `
-				<div class="detail-item">
-					<div class="detail-label">ממוצע ביטחון</div>
-					<div class="detail-value">${(
-						result.prediction_stats.avg_confidence * 100
-					).toFixed(1)}%</div>
-				</div>
-				`
-						: ""
-				}
-				`
-						: ""
-				}
-
-				<div class="detail-item">
-					<div class="detail-label">פירוט שכבות</div>
-					<div class="detail-value" style="font-size: 0.9em;">
-						${layerSummary}
-						${predictionSummary}
-					</div>
-				</div>
-
-				${
-					result.bbox
-						? `
-				<div class="detail-item">
-					<div class="detail-label">תחום גיאוגרפי</div>
-					<div class="detail-value" style="font-size: 0.85em;">
-						${result.bbox.map((coord) => coord.toFixed(4)).join(", ")}
-					</div>
-				</div>
-				`
-						: ""
-				}
-			`;
-		}
-	}
-	async handleSearch(event) {
-		event.preventDefault();
-		if (this._inFlight) return;
-		this._inFlight = true;
-		if (this.gpkgInput) this.gpkgInput.value = "";
-		this.selectedFile = null;
-		if (this.sendGpkgBtn) this.sendGpkgBtn.disabled = true;
-		this.showDownloadButton(false);
-
-		const city = (this.cityInput?.value || "").trim();
-		if (!city) {
-			this.showStatusMessage("נא הזן שם עיר", "error");
-			this._inFlight = false;
-			return;
-		}
-
-		this.hideStatusMessage();
-		this.setLoading(true);
-		// this.showLoadingOnMap(true);
-
-		// גיאוקוד + תזוזה לפני בקשה לשרת
-		await this.searchAndMoveToLocation(city);
-
-		try {
-			// ניסיון 1: לפי place
-			let data = await this.fetchPredictions(city);
-
-			// אם מעט מאוד קצוות – נסה מייד BBox סביב מרכז הגיאוקוד
-			const nEdges =
-				data?.network_stats?.n_edges ??
-				(data?.geojson?.features?.length || 0);
-			if (nEdges < 50 && this.lastGeocodeCenter) {
-				console.warn(
-					"[fallback] few edges (",
-					nEdges,
-					") → trying BBox 3km"
-				);
-				const fallback = await this.fetchPredictionsByBBox(
-					this.lastGeocodeCenter,
-					3
-				);
-				const n2 =
-					fallback?.network_stats?.n_edges ??
-					(fallback?.geojson?.features?.length || 0);
-				if (
-					(fallback?.geojson?.features?.length || 0) >
-					(data?.geojson?.features?.length || 0)
-				) {
-					data = fallback; // אם ה-fallback טוב יותר, נשתמש בו
-					this.showStatusMessage(
-						"האיזור שנבחר קטן מידי- החיפוש הורחב ל3 קילומטר מסביב ליישוב",
-						"success"
-					);
-				}
-				// אם גם ה-fallback דל – אפשר לנסות 5 ק"מ
-				if (n2 < 50) {
-					try {
-						const fallback2 = await this.fetchPredictionsByBBox(
-							this.lastGeocodeCenter,
-							5
-						);
-						const n3 =
-							fallback2?.network_stats?.n_edges ??
-							(fallback2?.geojson?.features?.length || 0);
-						if (n3 > n2) {
-							data = fallback2;
-							this.showStatusMessage(
-								"האיזור שנבחר קטן מידי- החיפוש הורחב ל5 קילומטר מסביב ליישוב",
-								"success"
-							);
-						}
-					} catch {}
-				}
-			}
-
-			this.displayResults(data, city);
-			this.showDownloadButton(true);
-		} catch (error) {
-			console.error("Prediction error:", error);
-			this.showStatusMessage(`שגיאה: ${error.message}`, "error");
-		} finally {
-			this.setLoading(false);
-
-			// this.showLoadingOnMap(false);
-			this._inFlight = false;
-		}
-	}
-
-	showLoadingOnMap(show) {
-		if (!this.loadingMessage) return;
-		if (show) {
-			this.loadingMessage.classList.remove("hidden");
-		} else {
-			this.loadingMessage.classList.add("hidden");
-		}
-	}
-
-	async searchAndMoveToLocation(cityName) {
-		try {
-			const base = "https://nominatim.openstreetmap.org/search";
-
-			// 1) local-first: בתוך תיחום המפה
-			const localBox = bboxFromLeafletMap(this.map);
-			let results = null;
-
-			if (localBox) {
-				const p = new URLSearchParams({
-					q: cityName,
-					format: "jsonv2",
-					addressdetails: "1",
-					"accept-language": "he,en",
-					limit: "5",
-					viewbox:
-						localBox.west +
-						"," +
-						localBox.north +
-						"," +
-						localBox.east +
-						"," +
-						localBox.south,
-					bounded: "1",
-				});
-				const urlLocal = base + "?" + p.toString();
-				const resp = await fetch(urlLocal);
-				results = await resp.json();
-			}
-
-			// בחירת מועמד מקומי אם יש
-			let loc = pickBestGeocode(results || [], this.lastCountryHint);
-
-			// 2) fallback גלובלי עם מדרוג
-			if (!loc) {
-				const p2 = new URLSearchParams({
-					q: cityName,
-					format: "jsonv2",
-					addressdetails: "1",
-					"accept-language": "he,en",
-					limit: "8",
-				});
-				const url2 = base + "?" + p2.toString();
-				const resp2 = await fetch(url2);
-				const results2 = await resp2.json();
-				loc = pickBestGeocode(results2 || [], this.lastCountryHint);
-			}
-
-			if (!loc) {
-				this.showStatusMessage(
-					"לא נמצא מיקום מתאים לחיפוש הזה",
-					"error"
-				);
-				return;
-			}
-
-			const lat = parseFloat(loc.lat);
-			const lon = parseFloat(loc.lon);
-			if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-				this.showStatusMessage("מיקום שהוחזר איינו תקין", "error");
-				return;
-			}
-
-			// נשמור country hint (בלי optional chaining)
-			const cc =
-				loc.address && typeof loc.address.country_code === "string"
-					? loc.address.country_code
-					: null;
-			if (cc) this.lastCountryHint = cc.toLowerCase();
-
-			// מנרמל/מצמצם BBOX לפי הצורך
-			const normBBox = normalizeBBoxFromLoc(loc, { lat: lat, lon: lon });
-			this.lastGeocodeCenter = { lat: lat, lon: lon };
-			this.lastGeocodeBBox = normBBox;
-
-			// תזוזה למקום
-			this.map.flyTo([lat, lon], 13, { animate: true, duration: 1.5 });
-			console.log("[geocode]", cityName, {
-				lat: lat,
-				lon: lon,
-				bbox: normBBox,
-				country: this.lastCountryHint,
-			});
-		} catch (err) {
-			console.error("Error finding location:", err);
-			this.showStatusMessage("שגיאה בחיפוש המיקום", "error");
-		}
-	}
-
-	// ----- fetchPredictions: place תמיד, bbox אופציונלי -----
-	async fetchPredictions(city) {
-		const date = this.buildSearchDate();
-		const timeOfDay = this.timeOfDaySelect?.value || "morning";
-		const weekType = this.weekTypeSelect?.value || "weekday";
-		const season = this.seasonSelect?.value || "summer";
-
-		const params = new URLSearchParams({
-			place: city, // << תמיד שולחים place
-			date,
-			season,
-			week_type: weekType,
-			time_of_day: timeOfDay,
-		});
-
-		// ברירת מחדל: תמיד לפי שם העיר (place-first)
-		params.set("place", city);
-
-		const url = `${this.API_BASE_URL}/predict?${params.toString()}`;
-		const response = await fetch(url, {
-			method: "GET",
-			headers: { Accept: "application/json" },
-		});
-
-		if (!response.ok) {
-			let errorMessage;
-			try {
-				const errorData = await response.json();
-				errorMessage =
-					errorData.error || `שגיאת שרת: ${response.status}`;
-			} catch {
-				errorMessage = `שגיאת שרת: ${response.status} ${response.statusText}`;
-			}
-			throw new Error(errorMessage);
-		}
-
-		const data = await response.json();
-		if (!data.geojson || !data.geojson.features) {
-			throw new Error("לא התקבלו נתוני מפה מהשרת");
-		}
-		return data;
-	}
-
-	// async fetchPredictionsByBBox(center, radiusKm = 3) {
-	// 	if (
-	// 		!center ||
-	// 		typeof center.lat !== "number" ||
-	// 		typeof center.lon !== "number"
-	// 	) {
-	// 		throw new Error("Center for BBox fallback is missing");
-	// 	}
-	// 	const timeOfDay = this.timeOfDaySelect?.value || "morning";
-	// 	const weekType = this.weekTypeSelect?.value || "weekday";
-	// 	const season = this.seasonSelect?.value || "summer";
-	// 	const date = this.buildSearchDate();
-
-	// 	// Leaflet מספק כלי נוח להמרה לריבוע סביב נקודה
-	// 	const bounds = L.latLng(center.lat, center.lon).toBounds(
-	// 		radiusKm * 1000
-	// 	);
-	// 	const sw = bounds.getSouthWest();
-	// 	const ne = bounds.getNorthEast();
-	// 	const bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`; // west,south,east,north
-
-	// 	const params = new URLSearchParams({
-	// 		bbox,
-	// 		date,
-	// 		season,
-	// 		week_type: weekType,
-	// 		time_of_day: timeOfDay,
-	// 	});
-
-	// 	const url = `${this.API_BASE_URL}/predict?${params.toString()}`;
-	// 	const resp = await fetch(url, {
-	// 		headers: { Accept: "application/json" },
-	// 	});
-
-	// 	if (!resp.ok) {
-	// 		let errorMessage;
-	// 		try {
-	// 			const errorData = await resp.json();
-	// 			errorMessage = errorData.error || `שגיאת שרת: ${resp.status}`;
-	// 		} catch {
-	// 			errorMessage = `שגיאת שרת: ${resp.status} ${resp.statusText}`;
-	// 		}
-	// 		throw new Error(errorMessage);
-	// 	}
-
-	// 	const data = await resp.json();
-	// 	if (!data.geojson || !data.geojson.features) {
-	// 		throw new Error("לא התקבלו נתוני מפה מהשרת (BBox)");
-	// 	}
-	// 	return data;
-	// }
-
-	// -----------------------------
-	// Display
-	// -----------------------------
-
-	async fetchPredictionsByBBox(center, radiusKm = 3, explicitBBox = null) {
-		const timeOfDay = this.timeOfDaySelect?.value || "morning";
-		const weekType = this.weekTypeSelect?.value || "weekday";
-		const season = this.seasonSelect?.value || "summer";
-		const date = this.buildSearchDate();
-
-		let bbox;
-		if (explicitBBox) {
-			// אם קיבלנו bbox מוכן (למשל מהריבוע שצוייר)
-			bbox = explicitBBox;
-		} else {
-			// חישוב ריבוע קטן סביב נקודה
-			const bounds = L.latLng(center.lat, center.lon).toBounds(
-				radiusKm * 1000
-			);
-			const sw = bounds.getSouthWest();
-			const ne = bounds.getNorthEast();
-			bbox = `${sw.lng},${sw.lat},${ne.lng},${ne.lat}`;
-		}
-
-		const params = new URLSearchParams({
-			bbox,
-			date,
-			season,
-			week_type: weekType,
-			time_of_day: timeOfDay,
-		});
-
-		const url = `${this.API_BASE_URL}/predict?${params.toString()}`;
-		const resp = await fetch(url, {
-			headers: { Accept: "application/json" },
-		});
-
-		if (!resp.ok) {
-			let errorMessage;
-			try {
-				const errorData = await resp.json();
-				errorMessage = errorData.error || `שגיאת שרת: ${resp.status}`;
-			} catch {
-				errorMessage = `שגיאת שרת: ${resp.status} ${resp.statusText}`;
-			}
-			throw new Error(errorMessage);
-		}
-
-		const data = await resp.json();
-		if (!data.geojson || !data.geojson.features) {
-			throw new Error("לא התקבלו נתוני מפה מהשרת (BBox)");
-		}
-		return data;
-	}
-
-	displayResults(data, cityName) {
-		// Show details panel
-		if (this.detailsPanel) {
-			this.detailsPanel.classList.remove("hidden");
-		}
-
-		// Extract stats from response
-		const numFeatures =
-			data.geojson && data.geojson.features
-				? data.geojson.features.length
-				: 0;
-		const processingTime = data.processing_time || "לא זמין";
-		const networkStats = data.network_stats || {
-			n_edges: numFeatures,
-			n_nodes: 0,
-		};
-
-		// Get current search parameters for display
-		const searchParams = this.getCurrentSearchParams();
-
-		// Update map with results
-		this.updateMapWithData(data.geojson);
-
-		// Create sample prediction from first feature if not provided
-		let samplePrediction = data.sample_prediction;
-		if (
-			!samplePrediction &&
-			data.geojson.features &&
-			data.geojson.features.length > 0
-		) {
-			const firstFeature = data.geojson.features[0];
-			samplePrediction = {
-				volume_bin: firstFeature.properties.volume_bin,
-				features: {
-					Hour: firstFeature.properties.Hour,
-					is_weekend: firstFeature.properties.is_weekend,
-					time_of_day: firstFeature.properties.time_of_day,
-					highway: firstFeature.properties.highway,
-					land_use: firstFeature.properties.land_use,
-				},
-			};
-		}
-
-		// Update details with search parameters
-		this.updatePredictionDetails({
-			sample_prediction: samplePrediction,
-			network_stats: networkStats,
-			processing_time: processingTime,
-			validation: data.validation || { warnings: [] },
-			search_parameters: data.search_parameters || null,
-			search_params: searchParams,
-			city_name: cityName,
-		});
-
-		// Show GPKG download button
-		// this.showDownloadButton(true);
-	}
-
-	getCurrentSearchParams() {
-		const hour = this.getHourFromTimeOfDay(
-			this.timeOfDaySelect?.value || "morning"
-		);
-		return {
-			season: this.seasonSelect?.value,
-			weekType: this.weekTypeSelect?.value,
-			timeOfDay: this.timeOfDaySelect?.value,
-			hour: hour,
-			isWeekend: this.weekTypeSelect?.value === "weekend",
-		};
-	}
-
-	updateMapWithData(geojson) {
-		// Remove previous layer
-		if (this.currentLayer) {
-			this.map.removeLayer(this.currentLayer);
-		}
-
-		// Add GeoJSON layer with enhanced styling
-		this.currentLayer = L.geoJSON(geojson, {
-			style: (feature) => this.getFeatureStyle(feature),
-			onEachFeature: (feature, layer) =>
-				this.bindFeaturePopup(feature, layer),
-		}).addTo(this.map);
-
-		// Fit map to bounds with padding
-		const bounds = this.currentLayer.getBounds();
-		if (bounds.isValid()) {
-			this.map.fitBounds(bounds, {
-				padding: [50, 50],
-				maxZoom: 15,
-			});
-		}
-	}
-
-	getFeatureStyle(feature) {
-		const volumeBin = feature.properties.volume_bin || 1;
-
-		// Enhanced color scheme
-		const colors = {
-			1: "#00FF00", // Green
-			2: "#FFFF00", // Yellow
-			3: "#FFA500", // Orange
-			4: "#FF0000", // Red
-			5: "#660000", // Dark Red
-		};
-
-		// Dynamic width based on volume
-		const widths = {
-			1: 2,
-			2: 3,
-			3: 4,
-			4: 5,
-			5: 6,
-		};
-
-		return {
-			color: colors[volumeBin] || colors[1],
-			weight: widths[volumeBin] || widths[1],
-			opacity: 0.85,
-		};
-	}
-
-	updateLegend() {
+	/**
+	 * Initialize legend for volume predictions
+	 */
+	initializeLegend() {
 		const legendContainer = document.getElementById("legendItems");
 		if (!legendContainer) return;
 
-		legendContainer.innerHTML = "";
-
 		const labels = {
-			1: "נפח נמוך (1)",
-			2: "נפח ביינוני-נמוך (2)",
-			3: "נפח ביינוני (3)",
+			1: "נפח נמוך מאוד (1)",
+			2: "נפח נמוך (2)",
+			3: "נפח בינוני (3)",
 			4: "נפח גבוה (4)",
 			5: "נפח גבוה מאוד (5)",
 		};
 
+		legendContainer.innerHTML = "";
 		for (let i = 1; i <= 5; i++) {
-			const color = this.getFeatureStyle({
-				properties: { volume_bin: i },
-			}).color;
+			const color = this.getVolumeColor(i);
 			const item = document.createElement("div");
 			item.className = "legend-item";
 			item.innerHTML = `
@@ -1294,65 +205,819 @@ class PedestrianPredictionApp {
 		}
 	}
 
-	// -----------------------------
-	// Popups & Formatting
-	// -----------------------------
+	// ============== UI Control Methods ==============
+
+	/**
+	 * Toggle the right panel collapse/expand state
+	 * Updates the collapse button icon accordingly
+	 * סמן הצגה/הסתרה של הפאנל הימני
+	 */
+	togglePanelCollapse() {
+		this.searchPanel.classList.toggle("collapsed");
+		const icon = this.panelCollapseBtn.querySelector(".collapse-icon");
+		if (icon) {
+			icon.textContent = this.searchPanel.classList.contains("collapsed")
+				? "▶"
+				: "X";
+		}
+	}
+
+	/**
+	 * Toggle the details panel visibility
+	 */
+	toggleDetailsPanel() {
+		this.detailsPanelContent.classList.toggle("collapsed");
+		const icon = this.detailsPanelToggle.querySelector(".toggle-icon");
+		if (icon) {
+			icon.textContent = this.detailsPanelContent.classList.contains(
+				"collapsed"
+			)
+				? "+"
+				: "−";
+		}
+	}
+
+	/**
+	 * Show status message to user
+	 */
+	showStatusMessage(message, type = "info", duration = 3000) {
+		if (!this.statusMessage) return;
+
+		this.statusMessage.textContent = message;
+		this.statusMessage.className = `status-message ${type}`;
+		this.statusMessage.classList.remove("hidden");
+
+		if (duration > 0) {
+			setTimeout(() => this.hideStatusMessage(), duration);
+		}
+	}
+
+	/**
+	 * Hide status message
+	 */
+	hideStatusMessage() {
+		if (!this.statusMessage) return;
+		this.statusMessage.classList.add("hidden");
+	}
+
+	/**
+	 * Set loading state for a button
+	 */
+	setButtonLoading(button, textSpan, spinner, isLoading) {
+		if (button) {
+			button.disabled = isLoading;
+		}
+
+		if (textSpan) {
+			if (isLoading) {
+				textSpan.classList.add("hidden");
+			} else {
+				textSpan.classList.remove("hidden");
+			}
+		}
+
+		if (spinner) {
+			if (isLoading) {
+				spinner.classList.remove("hidden");
+			} else {
+				spinner.classList.add("hidden");
+			}
+		}
+	}
+
+	/**
+	 * Show progress bar
+	 */
+	showProgress() {
+		this.progressSection.classList.remove("hidden");
+		this.updateProgress(0, this.totalRequests);
+	}
+
+	/**
+	 * Hide progress bar
+	 */
+	hideProgress() {
+		this.progressSection.classList.add("hidden");
+	}
+
+	/**
+	 * Update progress bar
+	 */
+	updateProgress(completed, total) {
+		const percentage = (completed / total) * 100;
+		this.progressBar.style.width = `${percentage}%`;
+		this.progressText.textContent = `${completed} / ${total}`;
+	}
+
+	// ============== City Search Methods ==============
+
+	/**
+	 * Handle city search and prediction request
+	 */
+	async handleCitySearchAndSendToServerForPredictions() {
+		this.hideStatusMessage();
+		const city = this.citySearchInput.value.trim();
+		if (!city) {
+			this.showStatusMessage("נא להזין שם עיר", "error");
+			return;
+		}
+
+		if (this.isProcessing) {
+			this.showStatusMessage("מעבד בקשה קודמת, נא להמתין", "info");
+			return;
+		}
+
+		this.isProcessing = true;
+		this.setButtonLoading(
+			this.searchCityBtn,
+			this.searchCityBtnText,
+			this.searchCitySpinner,
+			true
+		);
+
+		try {
+			// First, find and navigate to the city
+			await this.navigateToCity(city);
+
+			// Then, request predictions for all time combinations
+			await this.requestAllPredictionsCombinations(city);
+		} catch (error) {
+			console.error("City search error:", error);
+			this.showStatusMessage(`שגיאה: ${error.message}`, "error");
+		} finally {
+			this.isProcessing = false;
+			this.setButtonLoading(
+				this.searchCityBtn,
+				this.searchCityBtnText,
+				this.searchCitySpinner,
+				false
+			);
+		}
+	}
+
+	/**
+	 * Navigate map to a specific city location
+	 */
+	async navigateToCity(city) {
+		this.layerSelectionSection.classList.add("hidden");
+		this.downloadSection.classList.add("hidden");
+		this.clearCurrentLayer();
+
+		try {
+			const response = await fetch(
+				`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+					city
+				)}&format=json&limit=1`
+			);
+			const data = await response.json();
+
+			if (data && data.length > 0) {
+				const lat = parseFloat(data[0].lat);
+				const lon = parseFloat(data[0].lon);
+				this.map.flyTo([lat, lon], 14, {
+					animate: true,
+					duration: 1.5,
+				});
+				console.log(`Navigated to ${city}: [${lat}, ${lon}]`);
+			} else {
+				throw new Error(`לא נמצא מיקום עבור "${city}"`);
+			}
+		} catch (error) {
+			throw new Error(`שגיאה בחיפוש מיקום: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Request predictions for all time combinations with parallel requests
+	 */
+	async requestAllPredictionsCombinations(place, bbox = null) {
+		// Reset state
+		this.allLayersData = [];
+		this.completedRequests = 0;
+
+		// Clear all existing layers from map and memory
+		this.clearAllLayers();
+
+		// Show progress
+		this.showProgress();
+		this.showStatusMessage("מבקש חיזויים עבור כל השילובים...", "info", 0);
+
+		// Build single request to server multi endpoint
+		const seasons = ["winter", "spring", "summer", "autumn"];
+		const weekTypes = ["weekday", "weekend"];
+		const timesOfDay = ["morning", "afternoon", "evening", "night"];
+
+		const params = new URLSearchParams({
+			seasons: seasons.join(","),
+			week_types: weekTypes.join(","),
+			times_of_day: timesOfDay.join(","),
+		});
+		if (place) params.set("place", place);
+		if (bbox) {
+			params.set(
+				"bbox",
+				`${bbox.west},${bbox.south},${bbox.east},${bbox.north}`
+			);
+		}
+
+		this.totalRequests = 1;
+		try {
+			const resp = await fetch(`${this.API_BASE_URL}/predict-multi?${params.toString()}`);
+			if (!resp.ok) {
+				const err = await resp.json().catch(() => ({}));
+				throw new Error(err.error || `Server error: ${resp.status}`);
+			}
+			const data = await resp.json();
+			const layers = Array.isArray(data.layers) ? data.layers : [];
+			this.allLayersData = layers.map((layer) => {
+				const name = String(layer.name || "");
+				const [season, weekType, timeOfDay] = name.split("_");
+				return {
+					name,
+					displayName: `${this.translateSeason(season)} - ${this.translateWeekType(weekType)} - ${this.translateTimeOfDay(timeOfDay)}`,
+					geojson: layer.geojson,
+					metadata: {
+						season,
+						weekType,
+						timeOfDay,
+						featureCount: layer.feature_count || layer.geojson?.features?.length || 0,
+						location: data.place || place || "",
+						timestamp: new Date().toISOString(),
+					},
+				};
+			});
+
+			this.completedRequests = 1;
+			this.updateProgress(this.completedRequests, this.totalRequests);
+
+			this.hideProgress();
+			if (this.allLayersData.length > 0) {
+				this.displayLayerSelection(this.allLayersData);
+				this.displayLayer(this.allLayersData[0].name);
+				this.downloadSection.classList.remove("hidden");
+				this.showStatusMessage(`נטענו ${this.allLayersData.length} שכבות בהצלחה`, "success");
+				await this.createCombinedGpkg(data.place || place || "");
+			} else {
+				this.showStatusMessage("לא התקבלו תוצאות חיזוי", "error", 0);
+			}
+		} catch (error) {
+			this.hideProgress();
+			throw new Error(`שגיאה בקבלת חיזויים: ${error.message}`);
+		}
+	}
+
+	/**
+	 * Request a single prediction for specific time parameters
+	 */
+	async requestSinglePrediction(
+		place,
+		bbox,
+		{ season, weekType, timeOfDay }
+	) {
+		try {
+			const params = new URLSearchParams({
+				place: place || "",
+				season: season,
+				week_type: weekType,
+				time_of_day: timeOfDay,
+			});
+
+			if (bbox) {
+				params.set(
+					"bbox",
+					`${bbox.west},${bbox.south},${bbox.east},${bbox.north}`
+				);
+			}
+
+			const response = await fetch(
+				`${this.API_BASE_URL}/predict?${params.toString()}`
+			);
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(
+					error.error || `Server error: ${response.status}`
+				);
+			}
+
+			const data = await response.json();
+
+			// Transform the response to layer format
+			return {
+				name: `${season}_${weekType}_${timeOfDay}`,
+				displayName: `${this.translateSeason(
+					season
+				)} - ${this.translateWeekType(
+					weekType
+				)} - ${this.translateTimeOfDay(timeOfDay)}`,
+				geojson: data.geojson,
+				metadata: {
+					season: season,
+					weekType: weekType,
+					timeOfDay: timeOfDay,
+					featureCount: data.geojson?.features?.length || 0,
+					location: data.location,
+					timestamp: data.timestamp,
+				},
+			};
+		} catch (error) {
+			console.error(
+				`Error getting prediction for ${season}_${weekType}_${timeOfDay}:`,
+				error
+			);
+			throw error;
+		}
+	}
+
+	/**
+	 * Create combined GPKG from all layers (using server endpoint)
+	 */
+	async createCombinedGpkg(place) {
+		try {
+			// For now, we'll download individual GPKGs and combine client-side
+			// In production, you'd want a server endpoint that combines them
+
+			// Get the first prediction as GPKG to use as base
+			const params = new URLSearchParams({
+				place: place,
+				season: "winter",
+				week_type: "weekday",
+				time_of_day: "morning",
+			});
+
+			const response = await fetch(
+				`${this.API_BASE_URL}/predict-gpkg?${params.toString()}`
+			);
+
+			if (response.ok) {
+				this.currentGpkgBlob = await response.blob();
+			}
+		} catch (error) {
+			console.error("Error creating combined GPKG:", error);
+		}
+	}
+
+	// ============== GPKG Upload Methods ==============
+
+	/**
+	 * Handle GPKG file selection
+	 */
+	handleFileSelection() {
+		const file = this.gpkgFileInput.files?.[0];
+		if (file) {
+			if (!file.name.toLowerCase().endsWith(".gpkg")) {
+				this.showStatusMessage("יש לבחור קובץ GPKG", "error");
+				this.uploadGpkgBtn.disabled = true;
+				return;
+			}
+
+			this.selectedFile = file;
+			this.uploadGpkgBtn.disabled = false;
+			this.showStatusMessage(`נבחר קובץ: ${file.name}`, "info");
+		} else {
+			this.selectedFile = null;
+			this.uploadGpkgBtn.disabled = true;
+		}
+	}
+
+	/**
+	 * Handle GPKG file upload to server
+	 */
+	async handleGpkgUpload() {
+		this.hideStatusMessage();
+		if (!this.selectedFile) {
+			this.showStatusMessage("נא לבחור קובץ GPKG", "error");
+			return;
+		}
+
+		if (this.isProcessing) {
+			this.showStatusMessage("מעבד בקשה קודמת, נא להמתין", "info");
+			return;
+		}
+
+		this.isProcessing = true;
+		this.setButtonLoading(
+			this.uploadGpkgBtn,
+			this.uploadGpkgBtnText,
+			this.uploadGpkgSpinner,
+			true
+		);
+
+		try {
+			const formData = new FormData();
+			formData.append("file", this.selectedFile);
+
+			const response = await fetch(`${this.API_BASE_URL}/read-gpkg`, {
+				method: "POST",
+				body: formData,
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || `שגיאת שרת: ${response.status}`);
+			}
+
+			const result = await response.json();
+
+			// Process the returned layers
+			if (result.layers && result.layers.length > 0) {
+				this.allLayersData = result.layers.map((layer) => ({
+					name: layer.name,
+					displayName: layer.name,
+					geojson: layer.geojson,
+					metadata: {
+						featureCount: layer.feature_count,
+						is_prediction_layer: layer.is_prediction_layer,
+					},
+				}));
+
+				this.displayLayerSelection(this.allLayersData);
+				if (this.allLayersData.length > 0) {
+					this.displayLayer(this.allLayersData[0].name);
+				}
+
+				// If bbox is available, fit map
+				if (result.bbox) {
+					const [west, south, east, north] = result.bbox;
+					this.map.fitBounds(
+						[
+							[south, west],
+							[north, east],
+						],
+						{
+							padding: [50, 50],
+							maxZoom: 15,
+						}
+					);
+				}
+
+				this.showStatusMessage("הקובץ עובד בהצלחה", "success");
+			}
+		} catch (error) {
+			console.error("GPKG upload error:", error);
+			this.showStatusMessage(`שגיאה: ${error.message}`, "error");
+		} finally {
+			this.isProcessing = false;
+			this.setButtonLoading(
+				this.uploadGpkgBtn,
+				this.uploadGpkgBtnText,
+				this.uploadGpkgSpinner,
+				false
+			);
+		}
+	}
+
+	// ============== Local Navigation Methods ==============
+
+	/**
+	 * Handle find city locally (without server request)
+	 */
+	handleFindCity() {
+		const city = this.citySearchInput.value.trim();
+		if (!city) {
+			this.showStatusMessage("נא להזין שם עיר", "error");
+			return;
+		}
+
+		this.navigateToCity(city)
+			.then(() => this.showStatusMessage(`נמצא: ${city}`, "success"))
+			.catch((error) => this.showStatusMessage(error.message, "error"));
+	}
+
+	// ============== BBox Drawing Methods ==============
+
+	/**
+	 * Enable bbox drawing mode
+	 */
+	enableBboxDrawing() {
+		// Clear any existing bbox
+		this.clearBbox();
+
+		// Create custom draw handler
+		const rectangleDrawer = new L.Draw.Rectangle(this.map, {
+			shapeOptions: {
+				color: "#ff7800",
+				weight: 2,
+				fillOpacity: 0.1,
+			},
+		});
+
+		rectangleDrawer.enable();
+
+		// Handle drawing completion
+		this.map.once("draw:created", (e) => {
+			this.drawnBbox = e.layer;
+			this.drawnItems.addLayer(this.drawnBbox);
+
+			// Enable clear and send buttons, disable city search
+			this.clearBboxBtn.disabled = false;
+			this.sendBboxBtn.disabled = false;
+			this.searchCityBtn.disabled = true;
+
+			// Get bbox bounds
+			const bounds = this.drawnBbox.getBounds();
+			const bbox = {
+				west: bounds.getWest(),
+				south: bounds.getSouth(),
+				east: bounds.getEast(),
+				north: bounds.getNorth(),
+			};
+
+			console.log("BBox drawn:", bbox);
+			this.showStatusMessage("האזור סומן בהצלחה", "success");
+		});
+	}
+
+	/**
+	 * Clear drawn bbox from map
+	 */
+	clearBbox() {
+		if (this.drawnBbox) {
+			this.drawnItems.removeLayer(this.drawnBbox);
+			this.drawnBbox = null;
+		}
+
+		this.clearBboxBtn.disabled = true;
+		this.sendBboxBtn.disabled = true;
+		this.searchCityBtn.disabled = false;
+
+		this.showStatusMessage("האזור המסומן נמחק", "info");
+	}
+
+	/**
+	 * Send bbox to server for predictions
+	 */
+	async handleSendBbox() {
+		this.hideStatusMessage();
+		if (!this.drawnBbox) {
+			this.showStatusMessage("נא לסמן אזור תחילה", "error");
+			return;
+		}
+
+		if (this.isProcessing) {
+			this.showStatusMessage("מעבד בקשה קודמת, נא להמתין", "info");
+			return;
+		}
+
+		const bounds = this.drawnBbox.getBounds();
+		const bbox = {
+			west: bounds.getWest(),
+			south: bounds.getSouth(),
+			east: bounds.getEast(),
+			north: bounds.getNorth(),
+		};
+
+		this.isProcessing = true;
+		this.setButtonLoading(
+			this.sendBboxBtn,
+			this.sendBboxBtnText,
+			this.sendBboxSpinner,
+			true
+		);
+
+		try {
+			await this.requestAllPredictionsCombinations(null, bbox);
+			this.showStatusMessage(
+				"החיזויים עבור האזור נטענו בהצלחה",
+				"success"
+			);
+		} catch (error) {
+			console.error("BBox send error:", error);
+			this.showStatusMessage(`שגיאה: ${error.message}`, "error");
+		} finally {
+			this.isProcessing = false;
+			this.setButtonLoading(
+				this.sendBboxBtn,
+				this.sendBboxBtnText,
+				this.sendBboxSpinner,
+				false
+			);
+		}
+	}
+
+	// ============== Layer Management Methods ==============
+
+	/**
+	 * Display layer selection buttons
+	 */
+	displayLayerSelection(layers) {
+		this.layerSelectionSection.classList.remove("hidden");
+		this.layerButtonsContainer.innerHTML = "";
+
+		layers.forEach((layer) => {
+			const button = document.createElement("button");
+			button.className = "layer-btn";
+			button.textContent = layer.displayName;
+			button.dataset.layerName = layer.name;
+
+			button.addEventListener("click", () => {
+				// Remove active class from all buttons
+				this.layerButtonsContainer
+					.querySelectorAll(".layer-btn")
+					.forEach((btn) => {
+						btn.classList.remove("active");
+					});
+
+				// Add active class to clicked button
+				button.classList.add("active");
+
+				// Display the selected layer
+				this.displayLayer(layer.name);
+			});
+
+			this.layerButtonsContainer.appendChild(button);
+		});
+
+		// Mark first button as active
+		if (this.layerButtonsContainer.firstChild) {
+			this.layerButtonsContainer.firstChild.classList.add("active");
+		}
+	}
+
+	/**
+	 * Display a specific layer on the map
+	 */
+	displayLayer(layerName) {
+		// Clear current layer if exists
+		if (this.currentLayers[this.currentLayerName]) {
+			this.map.removeLayer(this.currentLayers[this.currentLayerName]);
+		}
+
+		// Find layer data
+		const layerData = this.allLayersData?.find((l) => l.name === layerName);
+		if (!layerData) {
+			console.error(`Layer ${layerName} not found`);
+			return;
+		}
+
+		// Create layer if not exists
+		if (!this.currentLayers[layerName]) {
+			this.currentLayers[layerName] = this.createGeoJSONLayer(
+				layerData.geojson
+			);
+		}
+
+		// Add layer to map
+		this.currentLayers[layerName].addTo(this.map);
+		this.currentLayerName = layerName;
+
+		// Update details panel
+		this.updateDetailsPanel(layerData);
+
+		console.log(
+			`Displaying layer: ${layerName} with ${
+				layerData.geojson?.features?.length || 0
+			} features`
+		);
+	}
+
+	/**
+	 * Clear the current layer from the map
+	 */
+	clearCurrentLayer() {
+		if (
+			this.currentLayerName &&
+			this.currentLayers[this.currentLayerName]
+		) {
+			this.map.removeLayer(this.currentLayers[this.currentLayerName]);
+			// אם רוצים רק להסתיר ולהשאיר בזיכרון:
+			// השאירו את האובייקט ב־currentLayers
+			// ואם רוצים למחוק גם מהזיכרון, בטלו את ההערה בשורה הבאה:
+			delete this.currentLayers[this.currentLayerName];
+
+			this.currentLayerName = null;
+			this.detailsPanel.classList.add("hidden");
+		}
+	}
+
+	/**
+	 * Clear all layers from map and memory
+	 */
+	clearAllLayers() {
+		// Remove all layers from map
+		for (const name in this.currentLayers) {
+			if (this.currentLayers[name]) {
+				this.map.removeLayer(this.currentLayers[name]);
+			}
+		}
+
+		// Clear all layer data
+		this.currentLayers = {};
+		this.currentLayerName = null;
+		this.detailsPanel.classList.add("hidden");
+	}
+	/**
+	 * Create GeoJSON layer with styling
+	 */
+	createGeoJSONLayer(geojson) {
+		if (!geojson || !geojson.features) {
+			console.warn("Invalid GeoJSON data");
+			return L.geoJSON(null);
+		}
+
+		return L.geoJSON(geojson, {
+			style: (feature) => this.getFeatureStyle(feature),
+			onEachFeature: (feature, layer) =>
+				this.bindFeaturePopup(feature, layer),
+		});
+	}
+
+	/**
+	 * Get style for a feature based on volume
+	 */
+	getFeatureStyle(feature) {
+		const volume =
+			feature.properties?.volume_bin ||
+			feature.properties?.volume_class ||
+			1;
+
+		return {
+			color: this.getVolumeColor(volume),
+			weight: this.getVolumeWidth(volume),
+			opacity: 0.85,
+		};
+	}
+
+	/**
+	 * Get color for volume level
+	 */
+	getVolumeColor(volume) {
+		const colors = {
+			1: "#00FF00", // Green
+			2: "#FFFF00", // Yellow
+			3: "#FFA500", // Orange
+			4: "#FF0000", // Red
+			5: "#660000", // Dark Red
+		};
+		return colors[volume] || colors[1];
+	}
+
+	/**
+	 * Get line width for volume level
+	 */
+	getVolumeWidth(volume) {
+		const widths = {
+			1: 2,
+			2: 3,
+			3: 4,
+			4: 5,
+			5: 6,
+		};
+		return widths[volume] || widths[1];
+	}
+
+	/**
+	 * Bind popup to feature
+	 */
 	bindFeaturePopup(feature, layer) {
-		const props = feature.properties;
-
+		const props = feature.properties || {};
 		const popupContent = `
-            <div style="direction: rtl; text-align: right; min-width: 250px;">
-                <h3 style="margin: 0 0 10px 0; color: #333;">
-                    ${props.name || "רחוב ללא שם"}
-                </h3>
+			<div style="direction: rtl; text-align: right; min-width: 250px;">
+				<h3 style="margin: 0 0 10px 0; color: #333;">
+					${props.name || "רחוב ללא שם"}
+				</h3>
 
-                <div style="background: ${this.getFeatureStyle(feature).color};
-                            color: white; padding: 8px; border-radius: 6px; margin-bottom: 10px;
-                            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">
-                    <strong>נפח חזוי: </strong>
-                    <span style="font-size: 1.2em; font-weight: bold;">
-                        ${props.volume_bin ?? "לא ידוע"}
-                    </span>
-                </div>
+				<div style="background: ${this.getFeatureStyle(feature).color};
+								color: white; padding: 8px; border-radius: 6px; margin-bottom: 10px;
+								text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">
+					<strong>נפח חזוי: </strong>
+					<span style="font-size: 1.2em; font-weight: bold;">
+						${props.volume_bin ?? props.volume_class ?? "לא ידוע"}
+					</span>
+				</div>
 
-                <div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
-                    <p style="margin: 5px 0;"><strong>סוג רחוב:</strong> ${
+				<div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
+					<p style="margin: 5px 0;"><strong>סוג רחוב:</strong> ${
 						this.translateHighway(props.highway) || "לא ידוע"
 					}</p>
-                    <p style="margin: 5px 0;"><strong>שימוש קרקע:</strong> ${
+					<p style="margin: 5px 0;"><strong>שימוש קרקע:</strong> ${
 						this.translateLandUse(props.land_use) || "לא ידוע"
 					}</p>
 
-                    <hr style="margin: 10px 0; border: none; border-top: 1px solid #dee2e6;">
+					<div style="font-size: 0.85em; color: #666; margin-top: 6px;">
+						<p style="margin: 3px 0;"><strong>Betweenness:</strong> ${this.formatProb(
+							props.edge_betweenness ?? props.betweenness
+						)}</p>
+						<p style="margin: 3px 0;"><strong>Closeness:</strong> ${this.formatProb(
+							props.edge_closeness ?? props.closeness
+						)}</p>
+					</div>
 
-                    <div style="font-size: 0.9em;">
-                        <p style="margin: 3px 0;"><strong>הסתברויות:</strong></p>
-                        ${this.formatProbabilities(props)}
-                    </div>
+					<hr style="margin: 10px 0; border: none; border-top: 1px solid #dee2e6;">
 
-                    <hr style="margin: 10px 0; border: none; border-top: 1px solid #dee2e6;">
+					<div style="font-size: 0.9em;">
+						<p style="margin: 3px 0;"><strong>הסתברויות:</strong></p>
+						${this.formatProbabilities(props)}
+					</div>
+				</div>
 
-                    <div style="font-size: 0.85em; color: #666;">
-                        <p style="margin: 3px 0;"><strong>Betweenness:</strong> ${
-							props.betweenness
-								? props.betweenness.toFixed(5)
-								: "לא ידוע"
-						}</p>
-                        <p style="margin: 3px 0;"><strong>Closeness:</strong> ${
-							props.closeness
-								? props.closeness.toFixed(5)
-								: "לא ידוע"
-						}</p>
-                    </div>
-                </div>
-
-                ${
+				${
 					props.osmid
 						? `<p style="font-size: 0.8em; color: #999; margin-top: 8px;">OSM ID: ${props.osmid}</p>`
 						: ""
 				}
-            </div>
-        `;
+			</div>
+		`;
 
 		layer.bindPopup(popupContent, {
 			maxWidth: 350,
@@ -1379,19 +1044,19 @@ class PedestrianPredictionApp {
 				const percentage = (parseFloat(prob) * 100).toFixed(1);
 				const barWidth = percentage;
 				html += `
-                    <div style="display: flex; align-items: center; margin: 2px 0;">
-                        <span style="width: 20px;">${i}:</span>
-                        <div style="flex: 1; background: #e9ecef; height: 14px; border-radius: 7px; margin: 0 5px; position: relative;">
-                            <div style="background: ${
+					<div style="display: flex; align-items: center; margin: 2px 0;">
+						<span style="width: 20px;">${i}:</span>
+						<div style="flex: 1; background: #e9ecef; height: 14px; border-radius: 7px; margin: 0 5px; position: relative;">
+							<div style="background: ${
 								this.getFeatureStyle({
 									properties: { volume_bin: i },
 								}).color
 							};
-                                        width: ${barWidth}%; height: 100%; border-radius: 7px;"></div>
-                        </div>
-                        <span style="width: 45px; text-align: left; font-size: 0.85em;">${percentage}%</span>
-                    </div>
-                `;
+												width: ${barWidth}%; height: 100%; border-radius: 7px;"></div>
+						</div>
+						<span style="width: 45px; text-align: left; font-size: 0.85em;">${percentage}%</span>
+					</div>
+				`;
 			}
 		}
 		html += "</div>";
@@ -1401,6 +1066,223 @@ class PedestrianPredictionApp {
 	formatProb(val) {
 		const n = Number(val);
 		return Number.isFinite(n) ? n.toFixed(5) : "לא ידוע";
+	}
+
+	// bindFeaturePopup(feature, layer) {
+	// 	const props = feature.properties || {};
+
+	// 	const popupContent = `
+	//         <div style="direction: rtl; text-align: right; min-width: 250px;">
+	//             <h3 style="margin: 0 0 10px 0; color: #333;">
+	//                 ${props.name || "רחוב ללא שם"}
+	//             </h3>
+	//             <div style="background: ${this.getVolumeColor(
+	// 				props.volume_bin || props.volume_class || 1
+	// 			)};
+	//                         color: white; padding: 8px; border-radius: 6px; margin-bottom: 10px;">
+	//                 <strong>נפח חזוי: </strong>
+	//                 <span style="font-size: 1.2em; font-weight: bold;">
+	//                     ${props.volume_bin || props.volume_class || "לא ידוע"}
+	//                 </span>
+	//             </div>
+	//             <div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
+	//                 <p style="margin: 5px 0;"><strong>סוג רחוב:</strong> ${
+	// 					props.highway || "לא ידוע"
+	// 				}</p>
+	//                 <p style="margin: 5px 0;"><strong>שימוש קרקע:</strong> ${
+	// 					props.land_use || "לא ידוע"
+	// 				}</p>
+	//                 ${
+	// 					props.edge_id
+	// 						? `<p style="margin: 5px 0;"><strong>מזהה:</strong> ${props.edge_id}</p>`
+	// 						: ""
+	// 				}
+	//             </div>
+	//         </div>
+	//     `;
+
+	// 	layer.bindPopup(popupContent, {
+	// 		maxWidth: 350,
+	// 		className: "custom-popup",
+	// 	});
+	// }
+
+	/**
+	 * Update details panel with layer information
+	 */
+	updateDetailsPanel(layerData) {
+		if (!this.predictionDetails) return;
+
+		this.detailsPanel.classList.remove("hidden");
+
+		const metadata = layerData.metadata || {};
+
+		this.predictionDetails.innerHTML = `
+            <div class="detail-item">
+                <div class="detail-label">שכבה נוכחית</div>
+                <div class="detail-value highlight">${
+					layerData.displayName
+				}</div>
+            </div>
+            ${
+				metadata.season
+					? `
+            <div class="detail-item">
+                <div class="detail-label">עונה</div>
+                <div class="detail-value">${this.translateSeason(
+					metadata.season
+				)}</div>
+            </div>`
+					: ""
+			}
+            ${
+				metadata.weekType
+					? `
+            <div class="detail-item">
+                <div class="detail-label">סוג יום</div>
+                <div class="detail-value">${this.translateWeekType(
+					metadata.weekType
+				)}</div>
+            </div>`
+					: ""
+			}
+            ${
+				metadata.timeOfDay
+					? `
+            <div class="detail-item">
+                <div class="detail-label">זמן ביום</div>
+                <div class="detail-value">${this.translateTimeOfDay(
+					metadata.timeOfDay
+				)}</div>
+            </div>`
+					: ""
+			}
+            <div class="detail-item">
+                <div class="detail-label">מספר רחובות</div>
+                <div class="detail-value">${metadata.featureCount || 0}</div>
+            </div>
+            ${
+				metadata.location
+					? `
+            <div class="detail-item">
+                <div class="detail-label">מיקום</div>
+                <div class="detail-value">${metadata.location}</div>
+            </div>`
+					: ""
+			}
+        `;
+	}
+
+	// ============== Download Methods ==============
+
+	/**
+	 * Handle GPKG download
+	 */
+	async handleDownloadGpkg() {
+		this.hideStatusMessage();
+		if (this.currentGpkgBlob) {
+			// If we have a pre-created GPKG blob, use it
+			const url = URL.createObjectURL(this.currentGpkgBlob);
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = `predictions_all_layers_${new Date()
+				.toISOString()
+				.slice(0, 10)}.gpkg`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+
+			this.showStatusMessage("הקובץ הורד בהצלחה", "success");
+		} else if (this.allLayersData.length > 0) {
+			// If no GPKG blob but we have layer data, try to download from server
+			this.setButtonLoading(
+				this.downloadGpkgBtn,
+				this.downloadBtnText,
+				this.downloadSpinner,
+				true
+			);
+
+			try {
+				// Get the place name from the first layer's metadata
+				const location =
+					this.allLayersData[0]?.metadata?.location ||
+					this.citySearchInput.value.trim() ||
+					"unknown";
+
+				// Download GPKG for any single combination (server will generate all if needed)
+				const params = new URLSearchParams({
+					place: location,
+					season: "winter",
+					week_type: "weekday",
+					time_of_day: "morning",
+				});
+
+				const response = await fetch(
+					`${this.API_BASE_URL}/predict-gpkg?${params.toString()}`
+				);
+
+				if (response.ok) {
+					const blob = await response.blob();
+					const url = URL.createObjectURL(blob);
+					const a = document.createElement("a");
+					a.href = url;
+					a.download = `predictions_${location}_${new Date()
+						.toISOString()
+						.slice(0, 10)}.gpkg`;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+					URL.revokeObjectURL(url);
+
+					this.showStatusMessage("הקובץ הורד בהצלחה", "success");
+				} else {
+					throw new Error("Failed to download GPKG");
+				}
+			} catch (error) {
+				console.error("Download error:", error);
+				this.showStatusMessage("שגיאה בהורדת הקובץ", "error");
+			} finally {
+				this.setButtonLoading(
+					this.downloadGpkgBtn,
+					this.downloadBtnText,
+					this.downloadSpinner,
+					false
+				);
+			}
+		} else {
+			this.showStatusMessage("אין קובץ להורדה", "error");
+		}
+	}
+
+	// ============== Translation Methods ==============
+
+	translateSeason(season) {
+		const translations = {
+			winter: "חורף",
+			spring: "אביב",
+			summer: "קיץ",
+			autumn: "סתיו",
+		};
+		return translations[season] || season;
+	}
+
+	translateWeekType(weekType) {
+		const translations = {
+			weekday: "אמצע שבוע",
+			weekend: "סוף שבוע",
+		};
+		return translations[weekType] || weekType;
+	}
+
+	translateTimeOfDay(timeOfDay) {
+		const translations = {
+			morning: "בוקר",
+			afternoon: "צהריים",
+			evening: "ערב",
+			night: "לילה",
+		};
+		return translations[timeOfDay] || timeOfDay;
 	}
 
 	translateHighway(highway) {
@@ -1429,263 +1311,11 @@ class PedestrianPredictionApp {
 		};
 		return translations[landUse] || landUse;
 	}
-
-	translateSeason(season) {
-		const translations = {
-			winter: "חורף",
-			spring: "אביב",
-			summer: "קיץ",
-			autumn: "סתיו",
-		};
-		return translations[season] || season;
-	}
-
-	translateWeekType(weekType) {
-		const translations = {
-			weekday: "אמצע שבוע",
-			weekend: "סוף שבוע",
-		};
-		return translations[weekType] || weekType;
-	}
-
-	translateTimeOfDay(timeOfDay) {
-		const translations = {
-			morning: "בוקר",
-			afternoon: "אחר צהריים",
-			evening: "ערב",
-			night: "לילה",
-		};
-		return translations[timeOfDay] || timeOfDay;
-	}
-
-	updatePredictionDetails(data) {
-		const sample = data.sample_prediction;
-		const stats = data.network_stats || {};
-		// const searchParams = data.search_parameters || {};
-
-		// נעדיף את אובייקט השרת ואם חסר – נשתמש במה שבנו מה-UI, עם נרמול שמות
-		const spSrv = data.search_parameters || null;
-		const spCli = data.search_params || {};
-		const searchParams = spSrv
-			? {
-					season: spSrv.season,
-					weekType: spSrv.week_type,
-					timeOfDay: spSrv.time_of_day,
-			  }
-			: spCli;
-
-		if (!this.predictionDetails) return;
-
-		this.predictionDetails.innerHTML = `
-                        <div class="detail-item">
-                            <div class="detail-label">עיר</div>
-                            <div class="detail-value highlight">${
-								data.city_name || "לא ידוע"
-							}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">נפח חזוי לדוגמה</div>
-                            <div class="detail-value highlight">${
-								sample?.volume_bin ?? "N/A"
-							}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">עונה</div>
-                            <div class="detail-value">${this.translateSeason(
-								searchParams.season
-							)}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">זמן בשבוע</div>
-                            <div class="detail-value">${this.translateWeekType(
-								searchParams.weekType
-							)}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">זמן ביום</div>
-                            <div class="detail-value">${this.translateTimeOfDay(
-								searchParams.timeOfDay
-							)}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">מספר רחובות</div>
-                            <div class="detail-value">${
-								stats.n_edges || 0
-							}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">מספר צמתים</div>
-                            <div class="detail-value">${
-								stats.n_nodes || 0
-							}</div>
-                        </div>
-
-                        <div class="detail-item">
-                            <div class="detail-label">זמן עיבוד</div>
-                            <div class="detail-value">${
-								data.processing_time ?? "לא זמין"
-							}s</div>
-                        </div>
-
-                        ${
-							data.validation?.warnings?.length > 0
-								? `
-                            <div class="detail-item">
-                                <div class="detail-label">אזהרות</div>
-                                <div class="detail-value">${data.validation.warnings.join(
-									", "
-								)}</div>
-                            </div>
-                        `
-								: ""
-						}
-                    `;
-	}
-
-	// -----------------------------
-	// Status & Buttons
-	// -----------------------------
-	setLoading(loading) {
-		if (this.searchBtn) this.searchBtn.disabled = loading;
-		if (this.cityInput) this.cityInput.disabled = loading;
-
-		// Disable all parameter inputs during loading
-		if (this.seasonSelect) this.seasonSelect.disabled = loading;
-		if (this.weekTypeSelect) this.weekTypeSelect.disabled = loading;
-		if (this.timeOfDaySelect) this.timeOfDaySelect.disabled = loading;
-
-		// ✓ נכלל כפתור שליחת GPKG בהשבתת טעינה
-		if (this.sendGpkgBtn)
-			this.sendGpkgBtn.disabled = loading || !this.selectedFile;
-
-		if (loading) {
-			this.buttonText?.classList.add("hidden");
-			this.loadingSpinner?.classList.remove("hidden");
-		} else {
-			this.buttonText?.classList.remove("hidden");
-			this.loadingSpinner?.classList.add("hidden");
-		}
-	}
-
-	showStatusMessage(message, type = "info") {
-		if (!this.statusMessage) return;
-		this.statusMessage.textContent = message;
-		this.statusMessage.className = `inline-status-message ${type}`;
-		this.statusMessage.classList.remove("hidden");
-
-		// Auto-hide success messages
-		if (type === "success") {
-			setTimeout(() => this.hideStatusMessage(), 3000);
-		}
-	}
-
-	hideStatusMessage() {
-		if (!this.statusMessage) return;
-		this.statusMessage.classList.add("hidden");
-	}
-
-	// ----- handleDownloadGpkg: place תמיד, bbox אופציונלי -----
-	async handleDownloadGpkg() {
-		const city = (this.cityInput?.value || this.lastPlaceName || "").trim();
-		if (!city) {
-			this.showStatusMessage("נא הזן שם עיר תחילה", "error");
-			return;
-		}
-
-		this.setDownloadLoading(true);
-		try {
-			const date = this.buildSearchDate();
-			const timeOfDay = this.timeOfDaySelect?.value || "morning";
-			const weekType = this.weekTypeSelect?.value || "weekday";
-			const season = this.seasonSelect?.value || "summer";
-
-			const params = new URLSearchParams({
-				place: city, // << תמיד שולחים place
-				date,
-				season,
-				week_type: weekType,
-				time_of_day: timeOfDay,
-			});
-
-			// בניית שם קובץ
-			const now = new Date();
-			const timestamp = now
-				.toISOString()
-				.replace(/[:.-]/g, "")
-				.slice(0, 15);
-			const citySlug = city.replace(/\s+/g, "_");
-			const filename = `predictions_${citySlug}_${season}_${weekType}_${timeOfDay}_${timestamp}.gpkg`;
-
-			// בניית URL ושליחה עם שם קובץ מותאם
-			const url = `${
-				this.API_BASE_URL
-			}/predict-gpkg?${params.toString()}`;
-			const link = document.createElement("a");
-			link.href = url;
-			link.download = filename; // שם הקובץ הרצוי
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-
-			this.showStatusMessage(
-				"מכין מסמך GPKG להורדה, הפעולה עשויה להארך מספר דקות",
-				"info"
-			);
-		} catch (error) {
-			console.error("Download error:", error);
-			this.showStatusMessage(
-				`שגיאה בהורדת קובץ GPKG: ${error.message}`,
-				"error"
-			);
-		} finally {
-			this.setDownloadLoading(false);
-			this.hideStatusMessage();
-		}
-	}
-
-	setDownloadLoading(loading) {
-		if (!this.downloadGpkgBtn) return;
-		this.downloadGpkgBtn.disabled = loading;
-
-		if (loading) {
-			this.downloadBtnText?.classList.add("hidden");
-			this.downloadLoadingSpinner?.classList.remove("hidden");
-		} else {
-			this.downloadBtnText?.classList.remove("hidden");
-			this.downloadLoadingSpinner?.classList.add("hidden");
-		}
-	}
-
-	showDownloadButton(show = true) {
-		if (!this.downloadGpkgBtn) return;
-		if (show) {
-			this.downloadGpkgBtn.classList.remove("invisible");
-		} else {
-			this.downloadGpkgBtn.classList.add("invisible");
-		}
-	}
 }
 
 // Initialize app when DOM is loaded
 document.addEventListener("DOMContentLoaded", () => {
-	// eslint-disable-next-line no-unused-vars
 	const app = new PedestrianPredictionApp();
+	window.pedestrianApp = app; // Make available globally for debugging
+	console.log("Pedestrian Prediction App initialized");
 });
-
-function setupCrossLinks() {
-	const link = document.getElementById("navToGpkg");
-	if (!link) return;
-	const apiParam = new URLSearchParams(location.search).get("api");
-	link.href =
-		"gpkg.html" + (apiParam ? `?api=${encodeURIComponent(apiParam)}` : "");
-}
-
-// קרא לה אחרי שהעמוד נטען / בסוף init
-document.addEventListener("DOMContentLoaded", setupCrossLinks);
-// או בתוך init() הקיים שלך: setupCrossLinks();
