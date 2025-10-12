@@ -1068,44 +1068,6 @@ class PedestrianPredictionApp {
 		return Number.isFinite(n) ? n.toFixed(5) : "לא ידוע";
 	}
 
-	// bindFeaturePopup(feature, layer) {
-	// 	const props = feature.properties || {};
-
-	// 	const popupContent = `
-	//         <div style="direction: rtl; text-align: right; min-width: 250px;">
-	//             <h3 style="margin: 0 0 10px 0; color: #333;">
-	//                 ${props.name || "רחוב ללא שם"}
-	//             </h3>
-	//             <div style="background: ${this.getVolumeColor(
-	// 				props.volume_bin || props.volume_class || 1
-	// 			)};
-	//                         color: white; padding: 8px; border-radius: 6px; margin-bottom: 10px;">
-	//                 <strong>נפח חזוי: </strong>
-	//                 <span style="font-size: 1.2em; font-weight: bold;">
-	//                     ${props.volume_bin || props.volume_class || "לא ידוע"}
-	//                 </span>
-	//             </div>
-	//             <div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
-	//                 <p style="margin: 5px 0;"><strong>סוג רחוב:</strong> ${
-	// 					props.highway || "לא ידוע"
-	// 				}</p>
-	//                 <p style="margin: 5px 0;"><strong>שימוש קרקע:</strong> ${
-	// 					props.land_use || "לא ידוע"
-	// 				}</p>
-	//                 ${
-	// 					props.edge_id
-	// 						? `<p style="margin: 5px 0;"><strong>מזהה:</strong> ${props.edge_id}</p>`
-	// 						: ""
-	// 				}
-	//             </div>
-	//         </div>
-	//     `;
-
-	// 	layer.bindPopup(popupContent, {
-	// 		maxWidth: 350,
-	// 		className: "custom-popup",
-	// 	});
-	// }
 
 	/**
 	 * Update details panel with layer information
