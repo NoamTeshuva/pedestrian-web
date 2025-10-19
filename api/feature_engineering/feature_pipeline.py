@@ -15,6 +15,23 @@ import geopandas as gpd
 import osmnx as ox
 import networkx as nx
 
+# Import loading animation control from app.py
+try:
+    import sys
+    import os
+    # Add the parent directory to the path to import from app.py
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from app import clear_loading_animation
+except ImportError:
+    # Fallback if import fails
+    def clear_loading_animation():
+        pass
+
+def log_with_clear(message: str):
+    """Log a message and clear loading animation if active."""
+    clear_loading_animation()
+    logging.info(message)
+
 from .landuse_features import (
     get_landuse_polygons, 
     compute_landuse_edges,
@@ -114,7 +131,7 @@ def extract_street_network(place: Optional[str] = None,
         PipelineError: If network extraction fails
     """
     try:
-        logging.info(f"Extracting street network for {place or 'bbox'}")
+        log_with_clear(f"Extracting street network for {place or 'bbox'}")
         
         # Download street network
         if place:
@@ -141,7 +158,7 @@ def extract_street_network(place: Optional[str] = None,
         edges_gdf = edges_gdf.to_crs("EPSG:4326")
         G = ox.project_graph(G_proj, to_crs="EPSG:4326")
         
-        logging.info(f"Extracted network: {len(G.nodes)} nodes, {len(edges_gdf)} edges")
+        log_with_clear(f"Extracted network: {len(G.nodes)} nodes, {len(edges_gdf)} edges")
         return G, edges_gdf
         
     except Exception as e:
@@ -184,7 +201,7 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
                 bbox=bbox
             )
             extraction_times['landuse'] = time.time() - start_time
-            logging.info(f"Land use extraction completed in {extraction_times['landuse']:.2f}s")
+            log_with_clear(f"Land use extraction completed in {extraction_times['landuse']:.2f}s")
         except LandUseError as e:
             logging.error(f"Land use extraction failed: {e.message}")
             # Graceful degradation: assign default land use
@@ -201,7 +218,7 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
             
             result_gdf = compute_centrality(graph, result_gdf, sample_size=sample_size)
             extraction_times['centrality'] = time.time() - start_time
-            logging.info(f"Centrality extraction completed in {extraction_times['centrality']:.2f}s")
+            log_with_clear(f"Centrality extraction completed in {extraction_times['centrality']:.2f}s")
         except CentralityError as e:
             logging.error(f"Centrality extraction failed: {e.message}")
             # Graceful degradation: assign default centrality
@@ -214,7 +231,7 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
         try:
             result_gdf = compute_highway(result_gdf)
             extraction_times['highway'] = time.time() - start_time
-            logging.info(f"Highway extraction completed in {extraction_times['highway']:.2f}s")
+            log_with_clear(f"Highway extraction completed in {extraction_times['highway']:.2f}s")
         except HighwayError as e:
             logging.error(f"Highway extraction failed: {e.message}")
             # Graceful degradation: assign default highway type
@@ -225,12 +242,12 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
         start_time = time.time()
         result_gdf = compute_time_features(result_gdf, timestamp=timestamp)
         extraction_times['temporal'] = time.time() - start_time
-        logging.info(f"Temporal extraction completed in {extraction_times['temporal']:.2f}s")
+        log_with_clear(f"Temporal extraction completed in {extraction_times['temporal']:.2f}s")
         
         # Log total extraction time
         total_time = sum(extraction_times.values())
-        logging.info(f"Total feature extraction completed in {total_time:.2f}s")
-        logging.info(f"Extraction breakdown: {extraction_times}")
+        log_with_clear(f"Total feature extraction completed in {total_time:.2f}s")
+        log_with_clear(f"Extraction breakdown: {extraction_times}")
         
         return result_gdf
         
@@ -304,7 +321,7 @@ def validate_features(features_gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
         if not length_values.empty and (length_values <= 0).any():
             validation_summary["warnings"].append("Non-positive length values found")
     
-    logging.info(f"Feature validation completed: {len(validation_summary['warnings'])} warnings")
+    log_with_clear(f"Feature validation completed: {len(validation_summary['warnings'])} warnings")
     
     return validation_summary
 
@@ -338,7 +355,7 @@ def run_feature_pipeline(place: Optional[str] = None,
     try:
         # 1. Validate inputs
         validate_pipeline_inputs(place, bbox, timestamp)
-        logging.info(f"Starting feature pipeline for {place or 'bbox'}")
+        log_with_clear(f"Starting feature pipeline for {place or 'bbox'}")
         
         # 2. Extract street network
         graph, edges_gdf = extract_street_network(place, bbox)
@@ -365,7 +382,7 @@ def run_feature_pipeline(place: Optional[str] = None,
             "categorical_columns": PipelineConfig.CATEGORICAL_COLUMNS
         }
         
-        logging.info(f"Pipeline completed successfully in {pipeline_metadata['processing_time']:.2f}s")
+        log_with_clear(f"Pipeline completed successfully in {pipeline_metadata['processing_time']:.2f}s")
         
         return features_gdf, pipeline_metadata
         
@@ -416,7 +433,7 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
             if col in model_features.columns:
                 model_features[col] = model_features[col].fillna(default_val)
         
-        logging.info(f"Prepared {len(model_features)} feature vectors for model input")
+        log_with_clear(f"Prepared {len(model_features)} feature vectors for model input")
         
         return model_features
         

@@ -148,15 +148,21 @@ def get_landuse_polygons(place: Optional[str] = None,
     
     # Download from OSM
     logging.info(f"Downloading land use data for {place or 'bbox'}")
-    landuse = _fetch_osm_landuse(place, bbox)
-    
-    # Process and filter data
-    landuse = _process_landuse_data(landuse)
-    
-    # Cache the result
-    _save_landuse_cache(landuse, save_path)
-    
-    return landuse
+    try:
+        landuse = _fetch_osm_landuse(place, bbox)
+        
+        # Process and filter data
+        landuse = _process_landuse_data(landuse)
+        
+        # Cache the result
+        _save_landuse_cache(landuse, save_path)
+        
+        return landuse
+    except Exception as e:
+        logging.warning(f"Failed to download land use data for {place or 'bbox'}: {e}")
+        logging.info("Returning empty land use data and continuing with prediction")
+        # Return empty land use data instead of failing
+        return gpd.GeoDataFrame(columns=['landuse', 'geometry'], crs="EPSG:4326")
 
 
 def _fetch_osm_landuse(place: Optional[str], 
@@ -301,6 +307,7 @@ def _get_or_load_landuse_data(land_gdf: Optional[gpd.GeoDataFrame],
     
     try:
         if place or bbox:
+            logging.info(f"Loading land use data for {place or 'bbox'}")
             return get_landuse_polygons(place=place, bbox=bbox)
         else:
             # No dynamic parameters provided, return empty
@@ -308,6 +315,7 @@ def _get_or_load_landuse_data(land_gdf: Optional[gpd.GeoDataFrame],
             return gpd.GeoDataFrame(columns=['landuse', 'geometry'], crs="EPSG:4326")
     except Exception as e:
         logging.warning(f"Failed to load land use data: {e}")
+        logging.info("Continuing with empty land use data")
         return gpd.GeoDataFrame(columns=['landuse', 'geometry'], crs="EPSG:4326")
 
 
