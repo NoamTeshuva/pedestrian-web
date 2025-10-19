@@ -84,7 +84,12 @@
 
             <!-- Layer Selection (shown after data loaded) -->
             <div id="layerSelectionSection" class="layer-selection hidden">
-                <h3>בחר שכבה להצגה:</h3>
+                <div class="layer-selection-header">
+                    <h3>בחר שכבה להצגה:</h3>
+                    <button id="clearLayersBtn" class="clear-layers-btn">
+                        הסר שכבה
+                    </button>
+                </div>
                 <div id="layerButtonsContainer" class="layer-buttons"></div>
             </div>
 
@@ -102,15 +107,13 @@
     </div>
 
     <!-- Floating Details Panel -->
-    <div id="detailsPanel" class="floating-panel details-panel hidden">
+    <div id="detailsPanel" class="floating-panel details-panel">
         <div class="panel-header">
-            <h3>פרטי תחזית</h3>
-            <button class="panel-toggle" id="detailsPanelToggle">
-                <span class="toggle-icon">−</span>
-            </button>
+            <h3 id="cityName">שם העיר</h3>
+            <span id="streetCount" class="street-count">0 רחובות</span>
         </div>
         <div class="panel-content" id="detailsPanelContent">
-            <div id="predictionDetails" class="prediction-details"></div>
+            <h4 id="layerName">שם השכבה</h4>
         </div>
     </div>
 

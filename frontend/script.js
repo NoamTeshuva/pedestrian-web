@@ -22,12 +22,14 @@ class PedestrianPredictionApp {
 		// Progress tracking
 		this.totalRequests = 32; // 4 seasons * 2 week types * 4 times of day
 		this.completedRequests = 0;
+		this.progressInterval = null;
 
 		// Initialize components
 		this.initializeElements();
 		this.initializeEventListeners();
 		this.initializeMap();
 		this.initializeLegend();
+		this.initializeDetailsPanel();
 	}
 
 	/**
@@ -70,6 +72,7 @@ class PedestrianPredictionApp {
 		this.layerButtonsContainer = document.getElementById(
 			"layerButtonsContainer"
 		);
+		this.clearLayersBtn = document.getElementById("clearLayersBtn");
 
 		// Download elements
 		this.downloadSection = document.getElementById("downloadSection");
@@ -80,11 +83,9 @@ class PedestrianPredictionApp {
 		// Status and details
 		this.statusMessage = document.getElementById("statusMessage");
 		this.detailsPanel = document.getElementById("detailsPanel");
-		this.detailsPanelToggle = document.getElementById("detailsPanelToggle");
-		this.detailsPanelContent = document.getElementById(
-			"detailsPanelContent"
-		);
-		this.predictionDetails = document.getElementById("predictionDetails");
+		this.cityName = document.getElementById("cityName");
+		this.streetCount = document.getElementById("streetCount");
+		this.layerName = document.getElementById("layerName");
 	}
 
 	/**
@@ -126,10 +127,12 @@ class PedestrianPredictionApp {
 			this.handleDownloadGpkg()
 		);
 
-		// Details panel toggle
-		this.detailsPanelToggle.addEventListener("click", () =>
-			this.toggleDetailsPanel()
+		// Clear layers
+		this.clearLayersBtn.addEventListener("click", () =>
+			this.handleClearLayers()
 		);
+
+		// Details panel is now always visible when there's data
 	}
 
 	/**
@@ -205,6 +208,17 @@ class PedestrianPredictionApp {
 		}
 	}
 
+	/**
+	 * Initialize details panel with default values
+	 */
+	initializeDetailsPanel() {
+		if (!this.cityName || !this.streetCount || !this.layerName) return;
+
+		this.cityName.textContent = "אין עיר נבחרת";
+		this.streetCount.textContent = "0 רחובות";
+		this.layerName.textContent = "אין שכבה נבחרת";
+	}
+
 	// ============== UI Control Methods ==============
 
 	/**
@@ -222,20 +236,6 @@ class PedestrianPredictionApp {
 		}
 	}
 
-	/**
-	 * Toggle the details panel visibility
-	 */
-	toggleDetailsPanel() {
-		this.detailsPanelContent.classList.toggle("collapsed");
-		const icon = this.detailsPanelToggle.querySelector(".toggle-icon");
-		if (icon) {
-			icon.textContent = this.detailsPanelContent.classList.contains(
-				"collapsed"
-			)
-				? "+"
-				: "−";
-		}
-	}
 
 	/**
 	 * Show status message to user
@@ -286,6 +286,92 @@ class PedestrianPredictionApp {
 	}
 
 	/**
+	 * Set loading state for the entire application
+	 */
+	setAppLoading(isLoading) {
+		if (isLoading) {
+			// Add loading cursor to panels and map
+			this.searchPanel.classList.add("loading-cursor");
+			this.detailsPanel.classList.add("loading-cursor");
+			document.getElementById("map").classList.add("map-loading");
+			
+			// Disable all interactive elements
+			this.disableAllInteractions();
+		} else {
+			// Remove loading cursor
+			this.searchPanel.classList.remove("loading-cursor");
+			this.detailsPanel.classList.remove("loading-cursor");
+			document.getElementById("map").classList.remove("map-loading");
+			
+			// Re-enable interactive elements
+			this.enableAllInteractions();
+		}
+	}
+
+	/**
+	 * Disable all interactive elements during loading
+	 */
+	disableAllInteractions() {
+		// Disable all buttons
+		const buttons = this.searchPanel.querySelectorAll("button");
+		buttons.forEach(btn => {
+			btn.disabled = true;
+		});
+
+		// Disable input fields
+		const inputs = this.searchPanel.querySelectorAll("input");
+		inputs.forEach(input => {
+			input.disabled = true;
+		});
+
+		// Disable map interactions
+		if (this.map) {
+			this.map.dragging.disable();
+			this.map.touchZoom.disable();
+			this.map.doubleClickZoom.disable();
+			this.map.scrollWheelZoom.disable();
+			this.map.boxZoom.disable();
+			this.map.keyboard.disable();
+		}
+	}
+
+	/**
+	 * Enable all interactive elements after loading
+	 */
+	enableAllInteractions() {
+		// Re-enable buttons (except those that should remain disabled)
+		const buttons = this.searchPanel.querySelectorAll("button");
+		buttons.forEach(btn => {
+			// Don't re-enable buttons that should be disabled based on state
+			if (btn.id === "clearBboxBtn" && !this.drawnBbox) {
+				btn.disabled = true;
+			} else if (btn.id === "sendBboxBtn" && !this.drawnBbox) {
+				btn.disabled = true;
+			} else if (btn.id === "uploadGpkgBtn" && !this.selectedFile) {
+				btn.disabled = true;
+			} else {
+				btn.disabled = false;
+			}
+		});
+
+		// Re-enable input fields
+		const inputs = this.searchPanel.querySelectorAll("input");
+		inputs.forEach(input => {
+			input.disabled = false;
+		});
+
+		// Re-enable map interactions
+		if (this.map) {
+			this.map.dragging.enable();
+			this.map.touchZoom.enable();
+			this.map.doubleClickZoom.enable();
+			this.map.scrollWheelZoom.enable();
+			this.map.boxZoom.enable();
+			this.map.keyboard.enable();
+		}
+	}
+
+	/**
 	 * Show progress bar
 	 */
 	showProgress() {
@@ -307,6 +393,51 @@ class PedestrianPredictionApp {
 		const percentage = (completed / total) * 100;
 		this.progressBar.style.width = `${percentage}%`;
 		this.progressText.textContent = `${completed} / ${total}`;
+	}
+
+	/**
+	 * Start monitoring progress updates from server
+	 */
+	startProgressMonitoring() {
+		if (this.progressInterval) {
+			clearInterval(this.progressInterval);
+		}
+		
+		this.progressInterval = setInterval(async () => {
+			try {
+				const response = await fetch(`${this.API_BASE_URL}/progress`);
+				if (response.ok) {
+					const progress = await response.json();
+					this.updateProgressFromServer(progress);
+				}
+			} catch (error) {
+				console.warn("Failed to fetch progress:", error);
+			}
+		}, 1000); // Check every second
+	}
+
+	/**
+	 * Stop monitoring progress updates
+	 */
+	stopProgressMonitoring() {
+		if (this.progressInterval) {
+			clearInterval(this.progressInterval);
+			this.progressInterval = null;
+		}
+	}
+
+	/**
+	 * Update progress from server response
+	 */
+	updateProgressFromServer(progress) {
+		if (progress.progress > 0 && progress.total_steps > 0) {
+			this.updateProgress(progress.progress, progress.total_steps);
+			
+			// Update progress text with server message
+			if (progress.message) {
+				this.progressText.textContent = `${progress.progress} / ${progress.total_steps} - ${progress.message}`;
+			}
+		}
 	}
 
 	// ============== City Search Methods ==============
@@ -334,6 +465,8 @@ class PedestrianPredictionApp {
 			this.searchCitySpinner,
 			true
 		);
+		this.setAppLoading(true);
+		this.startProgressMonitoring();
 
 		try {
 			// First, find and navigate to the city
@@ -352,6 +485,8 @@ class PedestrianPredictionApp {
 				this.searchCitySpinner,
 				false
 			);
+			this.setAppLoading(false);
+			this.stopProgressMonitoring();
 		}
 	}
 
@@ -419,6 +554,9 @@ class PedestrianPredictionApp {
 				`${bbox.west},${bbox.south},${bbox.east},${bbox.north}`
 			);
 		}
+		
+		// Always include average layer
+		params.set("include_average", "true");
 
 		this.totalRequests = 1;
 		try {
@@ -431,6 +569,22 @@ class PedestrianPredictionApp {
 			const layers = Array.isArray(data.layers) ? data.layers : [];
 			this.allLayersData = layers.map((layer) => {
 				const name = String(layer.name || "");
+				
+				// Handle average layer differently
+				if (name === "average") {
+					return {
+						name,
+						displayName: "שכבה ממוצעת",
+						geojson: layer.geojson,
+						metadata: {
+							featureCount: layer.feature_count || layer.geojson?.features?.length || 0,
+							location: data.place || place || "",
+							timestamp: new Date().toISOString(),
+						},
+					};
+				}
+				
+				// Handle regular layers
 				const [season, weekType, timeOfDay] = name.split("_");
 				return {
 					name,
@@ -453,7 +607,6 @@ class PedestrianPredictionApp {
 			this.hideProgress();
 			if (this.allLayersData.length > 0) {
 				this.displayLayerSelection(this.allLayersData);
-				this.displayLayer(this.allLayersData[0].name);
 				this.downloadSection.classList.remove("hidden");
 				this.showStatusMessage(`נטענו ${this.allLayersData.length} שכבות בהצלחה`, "success");
 				await this.createCombinedGpkg(data.place || place || "");
@@ -602,6 +755,8 @@ class PedestrianPredictionApp {
 			this.uploadGpkgSpinner,
 			true
 		);
+		this.setAppLoading(true);
+		this.startProgressMonitoring();
 
 		try {
 			const formData = new FormData();
@@ -632,9 +787,6 @@ class PedestrianPredictionApp {
 				}));
 
 				this.displayLayerSelection(this.allLayersData);
-				if (this.allLayersData.length > 0) {
-					this.displayLayer(this.allLayersData[0].name);
-				}
 
 				// If bbox is available, fit map
 				if (result.bbox) {
@@ -664,6 +816,8 @@ class PedestrianPredictionApp {
 				this.uploadGpkgSpinner,
 				false
 			);
+			this.setAppLoading(false);
+			this.stopProgressMonitoring();
 		}
 	}
 
@@ -774,6 +928,8 @@ class PedestrianPredictionApp {
 			this.sendBboxSpinner,
 			true
 		);
+		this.setAppLoading(true);
+		this.startProgressMonitoring();
 
 		try {
 			await this.requestAllPredictionsCombinations(null, bbox);
@@ -792,10 +948,29 @@ class PedestrianPredictionApp {
 				this.sendBboxSpinner,
 				false
 			);
+			this.setAppLoading(false);
+			this.stopProgressMonitoring();
 		}
 	}
 
 	// ============== Layer Management Methods ==============
+
+	/**
+	 * Handle clear layers button click
+	 */
+	handleClearLayers() {
+		// Clear current layer from map
+		this.clearCurrentLayer();
+		
+		// Remove active class from all layer buttons
+		this.layerButtonsContainer
+			.querySelectorAll(".layer-btn")
+			.forEach((btn) => {
+				btn.classList.remove("active");
+			});
+		
+		this.showStatusMessage("השכבות הוסרו מהמפה", "info");
+	}
 
 	/**
 	 * Display layer selection buttons
@@ -804,6 +979,37 @@ class PedestrianPredictionApp {
 		this.layerSelectionSection.classList.remove("hidden");
 		this.layerButtonsContainer.innerHTML = "";
 
+		// Check if we have an average layer from server
+		console.log("All layers received:", layers.map(l => l.name));
+		const hasAverageLayer = layers.some(layer => layer.name === 'average');
+		console.log("Has average layer:", hasAverageLayer);
+		
+		// Add average layer button first if we have one from server
+		if (hasAverageLayer) {
+			const averageButton = document.createElement("button");
+			averageButton.className = "layer-btn average-layer-btn";
+			averageButton.textContent = "שכבה ממוצעת";
+			averageButton.dataset.layerName = "average";
+
+			averageButton.addEventListener("click", () => {
+				// Remove active class from all buttons
+				this.layerButtonsContainer
+					.querySelectorAll(".layer-btn")
+					.forEach((btn) => {
+						btn.classList.remove("active");
+					});
+
+				// Add active class to clicked button
+				averageButton.classList.add("active");
+
+				// Display the average layer from server
+				this.displayLayer("average");
+			});
+
+			this.layerButtonsContainer.appendChild(averageButton);
+		}
+
+		// Add individual layer buttons
 		layers.forEach((layer) => {
 			const button = document.createElement("button");
 			button.className = "layer-btn";
@@ -828,10 +1034,7 @@ class PedestrianPredictionApp {
 			this.layerButtonsContainer.appendChild(button);
 		});
 
-		// Mark first button as active
-		if (this.layerButtonsContainer.firstChild) {
-			this.layerButtonsContainer.firstChild.classList.add("active");
-		}
+		// Don't automatically display any layer - let user choose
 	}
 
 	/**
@@ -871,6 +1074,8 @@ class PedestrianPredictionApp {
 		);
 	}
 
+
+
 	/**
 	 * Clear the current layer from the map
 	 */
@@ -886,7 +1091,6 @@ class PedestrianPredictionApp {
 			delete this.currentLayers[this.currentLayerName];
 
 			this.currentLayerName = null;
-			this.detailsPanel.classList.add("hidden");
 		}
 	}
 
@@ -904,7 +1108,6 @@ class PedestrianPredictionApp {
 		// Clear all layer data
 		this.currentLayers = {};
 		this.currentLayerName = null;
-		this.detailsPanel.classList.add("hidden");
 	}
 	/**
 	 * Create GeoJSON layer with styling
@@ -971,6 +1174,10 @@ class PedestrianPredictionApp {
 	 */
 	bindFeaturePopup(feature, layer) {
 		const props = feature.properties || {};
+		
+		// Check if this is an average layer feature
+		const isAverageLayer = props.is_average_layer === true || props.average_from_layers !== undefined;
+		
 		const popupContent = `
 			<div style="direction: rtl; text-align: right; min-width: 250px;">
 				<h3 style="margin: 0 0 10px 0; color: #333;">
@@ -980,7 +1187,7 @@ class PedestrianPredictionApp {
 				<div style="background: ${this.getFeatureStyle(feature).color};
 								color: white; padding: 8px; border-radius: 6px; margin-bottom: 10px;
 								text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">
-					<strong>נפח חזוי: </strong>
+					<strong>${isAverageLayer ? 'נפח ממוצע:' : 'נפח חזוי:'} </strong>
 					<span style="font-size: 1.2em; font-weight: bold;">
 						${props.volume_bin ?? props.volume_class ?? "לא ידוע"}
 					</span>
@@ -994,6 +1201,7 @@ class PedestrianPredictionApp {
 						this.translateLandUse(props.land_use) || "לא ידוע"
 					}</p>
 
+
 					<div style="font-size: 0.85em; color: #666; margin-top: 6px;">
 						<p style="margin: 3px 0;"><strong>Betweenness:</strong> ${this.formatProb(
 							props.edge_betweenness ?? props.betweenness
@@ -1004,9 +1212,8 @@ class PedestrianPredictionApp {
 					</div>
 
 					<hr style="margin: 10px 0; border: none; border-top: 1px solid #dee2e6;">
-
 					<div style="font-size: 0.9em;">
-						<p style="margin: 3px 0;"><strong>הסתברויות:</strong></p>
+						<p style="margin: 3px 0;"><strong>${isAverageLayer ? 'הסתברויות ממוצעות:' : 'הסתברויות:'}</strong></p>
 						${this.formatProbabilities(props)}
 					</div>
 				</div>
@@ -1073,66 +1280,27 @@ class PedestrianPredictionApp {
 	 * Update details panel with layer information
 	 */
 	updateDetailsPanel(layerData) {
-		if (!this.predictionDetails) return;
-
-		this.detailsPanel.classList.remove("hidden");
+		if (!this.detailsPanel || !this.cityName || !this.streetCount || !this.layerName) return;
 
 		const metadata = layerData.metadata || {};
 
-		this.predictionDetails.innerHTML = `
-            <div class="detail-item">
-                <div class="detail-label">שכבה נוכחית</div>
-                <div class="detail-value highlight">${
-					layerData.displayName
-				}</div>
-            </div>
-            ${
-				metadata.season
-					? `
-            <div class="detail-item">
-                <div class="detail-label">עונה</div>
-                <div class="detail-value">${this.translateSeason(
-					metadata.season
-				)}</div>
-            </div>`
-					: ""
-			}
-            ${
-				metadata.weekType
-					? `
-            <div class="detail-item">
-                <div class="detail-label">סוג יום</div>
-                <div class="detail-value">${this.translateWeekType(
-					metadata.weekType
-				)}</div>
-            </div>`
-					: ""
-			}
-            ${
-				metadata.timeOfDay
-					? `
-            <div class="detail-item">
-                <div class="detail-label">זמן ביום</div>
-                <div class="detail-value">${this.translateTimeOfDay(
-					metadata.timeOfDay
-				)}</div>
-            </div>`
-					: ""
-			}
-            <div class="detail-item">
-                <div class="detail-label">מספר רחובות</div>
-                <div class="detail-value">${metadata.featureCount || 0}</div>
-            </div>
-            ${
-				metadata.location
-					? `
-            <div class="detail-item">
-                <div class="detail-label">מיקום</div>
-                <div class="detail-value">${metadata.location}</div>
-            </div>`
-					: ""
-			}
-        `;
+		// Update city name
+		if (metadata.location) {
+			this.cityName.textContent = metadata.location;
+		} else {
+			this.cityName.textContent = "מיקום לא ידוע";
+		}
+
+		// Update street count
+		const count = metadata.featureCount || 0;
+		this.streetCount.textContent = `${count} רחובות`;
+
+		// Update layer name
+		if (layerData.name === "average") {
+			this.layerName.textContent = "שכבה ממוצעת";
+		} else {
+			this.layerName.textContent = layerData.displayName || layerData.name;
+		}
 	}
 
 	// ============== Download Methods ==============

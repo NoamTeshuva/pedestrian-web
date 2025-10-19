@@ -213,10 +213,37 @@ body {
     border-top: 2px solid #e0e0e0;
 }
 
-.layer-selection h3 {
+.layer-selection-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 15px;
+}
+
+.layer-selection h3 {
+    margin: 0;
     color: #333;
     font-size: 1.1em;
+}
+
+.clear-layers-btn {
+    padding: 6px 12px;
+    border: 1px solid #dc3545;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #dc3545;
+    color: white;
+    white-space: nowrap;
+}
+
+.clear-layers-btn:hover {
+    background: #c82333;
+    border-color: #bd2130;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
 }
 
 .layer-buttons {
@@ -245,6 +272,39 @@ body {
     background: var(--primary-color);
     color: white;
     border-color: var(--primary-color);
+}
+
+/* Average Layer Button Special Styling */
+.average-layer-btn {
+    background: white !important;
+    color: #333 !important;
+    border: 2px solid #e0e0e0 !important;
+    font-weight: 700 !important;
+    position: relative;
+    overflow: hidden;
+}
+
+.average-layer-btn::before {
+    content: "📊";
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+}
+
+.average-layer-btn:hover {
+    background: #f8f9ff !important;
+    border-color: var(--primary-color) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.average-layer-btn.active {
+    background: var(--primary-color) !important;
+    color: white !important;
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
 /* Download Section */
@@ -323,87 +383,67 @@ body {
 /* Floating Details Panel */
 .details-panel {
     position: fixed;
-    bottom: 20px;
+    top: 20px;
     left: 20px;
-    width: 350px;
+    width: 300px;
     max-width: calc(100vw - 440px);
     background: var(--panel-bg);
     backdrop-filter: blur(20px);
     border-radius: 12px;
     box-shadow: var(--shadow);
     z-index: 1000;
+    display: block !important; /* Ensure panel is always visible */
 }
 
 .details-panel .panel-header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border-radius: 12px 12px 0 0;
     padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.details-panel .panel-header h3 {
+    margin: 0;
+    color: white;
+    font-size: 1.1em;
+    font-weight: 600;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+}
+
+.details-panel .street-count {
+    color: white;
+    font-size: 0.9em;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 6px;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
 }
 
 .details-panel .panel-content {
-    max-height: 400px;
+    padding: 15px;
 }
 
-.panel-toggle {
-    background: rgba(255, 255, 255, 0.2);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 18px;
-    font-weight: bold;
-}
-
-.panel-content.collapsed {
-    max-height: 0;
-    padding: 0;
-    overflow: hidden;
-}
-
-/* Prediction Details */
-.prediction-details {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.detail-item {
+.details-panel .panel-content h4 {
+    margin: 0;
+    color: #333;
+    font-size: 1em;
+    font-weight: 600;
+    text-align: center;
+    padding: 8px;
     background: #f8f9fa;
-    padding: 12px;
-    border-radius: 8px;
+    border-radius: 6px;
     border-left: 4px solid var(--primary-color);
 }
 
-.detail-label {
-    font-weight: 600;
-    color: #555;
-    margin-bottom: 4px;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.detail-value {
-    font-size: 14px;
-    color: #333;
-}
-
-.detail-value.highlight {
-    font-weight: 700;
-    color: var(--primary-color);
-    font-size: 16px;
-}
 
 /* Floating Legend */
 .floating-legend {
     position: fixed;
-    bottom: 20px;
-    right: 20px;
+    bottom: 80px;
+    left: 20px;
     background: var(--panel-bg);
     backdrop-filter: blur(20px);
     border-radius: 12px;
@@ -411,6 +451,7 @@ body {
     box-shadow: var(--shadow);
     z-index: 999;
     min-width: 200px;
+    display: block !important; /* Ensure legend is always visible */
 }
 
 .floating-legend h4 {
@@ -551,12 +592,103 @@ body {
     .details-panel {
         width: calc(100vw - 40px);
         max-width: none;
+        top: 20px;
+        left: 20px;
     }
     
     .floating-legend {
-        right: auto;
+        bottom: 80px;
         left: 20px;
+        right: auto;
     }
+    
+    .leaflet-control-zoom {
+        bottom: 20px !important;
+        left: 20px !important;
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 2px !important;
+    }
+}
+
+/* Loading Cursor States */
+.loading-cursor {
+    cursor: wait !important;
+}
+
+.loading-cursor * {
+    cursor: wait !important;
+}
+
+/* Loading overlay for panels */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(2px);
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.loading-overlay .loading-text {
+    font-size: 14px;
+    color: #666;
+    font-weight: 600;
+}
+
+.loading-overlay .loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Map loading state */
+.map-loading {
+    position: relative;
+}
+
+.map-loading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(1px);
+    z-index: 1000;
+    cursor: wait;
+}
+
+/* Leaflet Zoom Controls - Move to bottom left and arrange horizontally */
+.leaflet-control-zoom {
+    position: fixed !important;
+    bottom: 20px !important;
+    left: 20px !important;
+    top: auto !important;
+    right: auto !important;
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 2px !important;
+}
+
+.leaflet-control-zoom a {
+    display: inline-block !important;
+    width: 30px !important;
+    height: 30px !important;
+    line-height: 30px !important;
+    text-align: center !important;
+    border-radius: 4px !important;
 }
 
 /* Leaflet Popup Customization */
