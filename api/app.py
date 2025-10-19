@@ -30,6 +30,7 @@ import logging
 import time
 import datetime as dt
 from datetime import datetime
+import threading
 from typing import Optional, Tuple
 from catboost import CatBoostClassifier, Pool
 import math
@@ -123,8 +124,27 @@ except ImportError as e:
             pass
         raise ImportError(f"Could not import osm_tiles: {e}. Searched {len(search_paths)} locations but file not found.")
 
-# Configure logging
+# Configure logging - show normal info but disable Flask request spam
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+# Disable Flask request logging to keep terminal clean
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
+# Global variable to store progress updates
+progress_updates = {
+    "current_step": "",
+    "progress": 0,
+    "total_steps": 0,
+    "message": "",
+    "timestamp": None
+}
+
+# Global variable for loading animation
+loading_animation_active = False
+last_progress_time = 0
+animation_counter = 0
 
 app = Flask(__name__)
 
@@ -145,6 +165,85 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 def json_response(obj, status: int = 200) -> Response:
     return Response(fast_dumps(obj), status=status, mimetype="application/json")
+
+def update_progress(step: str, progress: int, total: int, message: str = ""):
+    """Update global progress information."""
+    global progress_updates, last_progress_time
+    progress_updates.update({
+        "current_step": step,
+        "progress": progress,
+        "total_steps": total,
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    # Update the last progress time
+    last_progress_time = time.time()
+    
+    # Only show loading animation if no specific message is provided
+    if not message or message == "":
+        dots = "." * ((progress % 6) + 1)
+        print(f"\rLoading{dots:<6}", end="", flush=True)
+    else:
+        # Clear loading line and show the actual message
+        print(f"\r{' ' * 50}\r{message:<50}", flush=True)
+
+def finish_progress(message: str = "Completed"):
+    """Finish progress and show final message."""
+    global loading_animation_active
+    loading_animation_active = False
+    print(f"\r{' ' * 50}\r{message:<50}", flush=True)
+
+def clear_loading_line():
+    """Clear the loading animation line."""
+    print(f"\r{' ' * 50}\r", end="", flush=True)
+
+def log_with_clear(message: str):
+    """Log a message and clear loading animation if active."""
+    if loading_animation_active:
+        clear_loading_line()
+    logging.info(message)
+
+# Global function to clear loading animation (accessible from other modules)
+def clear_loading_animation():
+    """Clear loading animation - can be called from other modules."""
+    if loading_animation_active:
+        clear_loading_line()
+
+def start_loading_animation():
+    """Start loading animation for quiet periods."""
+    global loading_animation_active, last_progress_time
+    loading_animation_active = True
+    last_progress_time = time.time()
+    # Reset animation counter to start from 0
+    global animation_counter
+    animation_counter = 0
+
+def stop_loading_animation():
+    """Stop loading animation."""
+    global loading_animation_active
+    loading_animation_active = False
+
+def loading_animation_thread():
+    """Background thread to show loading animation during quiet periods."""
+    global loading_animation_active, last_progress_time, animation_counter
+    
+    while True:
+        if loading_animation_active:
+            current_time = time.time()
+            # If no progress update for 3 seconds, start showing animation
+            if current_time - last_progress_time > 3:
+                dots = "." * ((animation_counter % 6) + 1)
+                print(f"\rLoading{dots:<6}", end="", flush=True)
+                animation_counter += 1
+        else:
+            animation_counter = 0
+        
+        time.sleep(0.5)  # Update every 500ms
+
+# Start the loading animation thread
+loading_thread = threading.Thread(target=loading_animation_thread, daemon=True)
+loading_thread.start()
 
 # Helper functions for processing search parameters
 def parse_search_parameters(request_args) -> dict:
@@ -433,17 +532,40 @@ def _qml_predictions_categorized() -> str:
   <layerGeometryType>1</layerGeometryType>
 </qgis>
 """
-
+"""
+model name option:
+[0]-cb_loco_train_dublin_melbourne_nyc_test_zurich.cbm - מה שהיה עד כה
+[1]-cb_model.cbm - חוזה ערים בצורה יותר רגועה - יש יותר ירוק על המפה
+[2]-cb_model_BEST_melbourne_35pct.cbm - לא עובד בעיה עם השעות
+[3]-cb_model_zurich_test_43pct.cbm - לא עובד בעיה עם השעות
+[4]-cb_model_multi_city.cbm - מנבא מוזר, מרכז קצרין תמיד אדום גם בלילה
+[5]-cb_model_melbourne_test_33pct.cbm - לא עובד בעיה עם השעות
+[6]-cb_model_four_city.cbm -מנבא מוזר, מרכז קצרין תמיד אדום גם בלילה
+"""
+MODELS_LIST = [
+    "cb_loco_train_dublin_melbourne_nyc_test_zurich.cbm",
+    "cb_model.cbm",
+    "cb_model_BEST_melbourne_35pct.cbm",
+    "cb_model_zurich_test_43pct.cbm",
+    "cb_model_multi_city.cbm",
+    "cb_model_melbourne_test_33pct.cbm",
+    "cb_model_four_city.cbm"
+]
+MODEL_NAME = MODELS_LIST[0]
 # Load the pre-trained CatBoost model
 MODEL_PATH = os.getenv(
     "MODEL_PATH", 
-    os.path.join(os.path.dirname(__file__), "models", "cb_loco_train_dublin_melbourne_nyc_test_zurich.cbm")
+    os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
 )
 
 try:
     model = CatBoostClassifier()
     model.load_model(MODEL_PATH)
+    print("=" * 60)
+    print("🚀 PEDESTRIAN VOLUME PREDICTION SERVER")
+    print("=" * 60)
     logging.info(f"Successfully loaded CatBoost model from {MODEL_PATH}")
+    print("=" * 60)
 except Exception as e:
     logging.error(f"Failed to load model from {MODEL_PATH}: {e}")
     model = None
@@ -1104,7 +1226,7 @@ def predict():
         model_features = prepare_model_features(features_gdf)
         
         # 7. Make predictions
-        logging.info(f"Making predictions for {len(model_features)} edges")
+        log_with_clear(f"Making predictions for {len(model_features)} edges")
         
         # Get categorical feature indices
         cat_feature_indices = [model_features.columns.get_loc(col) for col in CAT_COLS if col in model_features.columns]
@@ -1313,7 +1435,7 @@ def predict_gpkg():
         search_params = parse_search_parameters(request.args)
         target_datetime = search_params['datetime']
 
-        logging.info(f"GPKG prediction request for place={place}, bbox={bbox}, target_datetime={target_datetime}")
+        log_with_clear(f"GPKG prediction request for place={place}, bbox={bbox}, target_datetime={target_datetime}")
 
         if model is None:
             return jsonify({"error": "Model not available", "code": 503,
@@ -1326,6 +1448,9 @@ def predict_gpkg():
             timestamp=target_datetime.isoformat()
         )
         
+        # Start loading animation again after pipeline completion
+        start_loading_animation()
+        
         # Override time-based features with search parameters
         if len(features_gdf) > 0:
             search_features = search_params['features']
@@ -1337,7 +1462,7 @@ def predict_gpkg():
         model_features = prepare_model_features(features_gdf)
         
         # Make predictions
-        logging.info(f"Making predictions for {len(model_features)} edges")
+        log_with_clear(f"Making predictions for {len(model_features)} edges")
         
         # Get categorical feature indices
         cat_feature_indices = [model_features.columns.get_loc(col) for col in CAT_COLS if col in model_features.columns]
@@ -1447,7 +1572,10 @@ def predict_gpkg():
                 pass
             return resp
 
-        logging.info(f"GPKG file created with {len(preds_gdf)} predictions for {place}")
+        log_with_clear(f"GPKG file created with {len(preds_gdf)} predictions for {place}")
+        
+        # Show final success message
+        finish_progress("חיזוי הושלם בהצלחה")
 
         return send_file(
             tmp_path,
@@ -1474,6 +1602,13 @@ def ping():
 def health():
     """Health check endpoint."""
     return jsonify({"status": "ok", "service": "pedestrian-api", "port": 8000})
+
+
+@app.route("/progress", methods=["GET"])
+def get_progress():
+    """Get current progress updates."""
+    global progress_updates
+    return jsonify(progress_updates)
 
 
 # @app.route("/read-gpkg", methods=["POST"])
@@ -2193,6 +2328,115 @@ def build_search_timestamp(season: str, week_type: str, time_of_day: str) -> dat
 
     return datetime(base_date.year, base_date.month, base_date.day, hour, 0, 0)
 
+def calculate_average_layer(layers):
+    """
+    Calculate average layer from multiple prediction layers.
+    
+    For each street, this function:
+    1. Creates 5 variables (one for each volume class probability)
+    2. Sums up all probabilities from all 32 combinations (4 seasons × 2 week types × 4 times of day)
+    3. Divides each sum by 32 to get the annual average probability
+    4. The volume class with the highest average probability becomes the street's predicted volume
+    5. The street is colored according to this predicted volume class
+    
+    Args:
+        layers: list of layer dicts with {name, geojson, feature_count}
+    
+    Returns:
+        dict: average layer with averaged probabilities and predicted class
+    """
+    if not layers or len(layers) < 2:
+        return None
+    
+    try:
+        # Get the first layer as base structure
+        base_layer = layers[0]
+        if not base_layer.get('geojson') or not base_layer['geojson'].get('features'):
+            return None
+        
+        # Create a map to store probability sums and counts for each feature
+        feature_averages = {}
+        
+        # Process each layer
+        for layer in layers:
+            if not layer.get('geojson') or not layer['geojson'].get('features'):
+                continue
+                
+            for feature in layer['geojson']['features']:
+                # Use osmid, edge_id, or geometry as unique identifier
+                feature_id = (feature.get('properties', {}).get('osmid') or 
+                            feature.get('properties', {}).get('edge_id') or 
+                            str(feature.get('geometry', {})))
+                
+                if feature_id not in feature_averages:
+                    feature_averages[feature_id] = {
+                        'geometry': feature.get('geometry'),
+                        'properties': feature.get('properties', {}).copy(),
+                        'probability_sums': [0.0] * 5,  # For classes 1-5
+                        'count': 0
+                    }
+                
+                avg_data = feature_averages[feature_id]
+                
+                # Sum probabilities for each class (1-5)
+                for i in range(1, 6):
+                    prob = feature.get('properties', {}).get(f'proba_{i}')
+                    if prob is not None:
+                        avg_data['probability_sums'][i-1] += float(prob)
+                
+                avg_data['count'] += 1
+        
+        # Create average features
+        average_features = []
+        for feature_id, avg_data in feature_averages.items():
+            if avg_data['count'] == 0:
+                continue
+                
+            # Calculate average probabilities - divide by 32 (total number of combinations)
+            # 4 seasons × 2 week types × 4 times of day = 32 combinations
+            avg_probs = [sum_val / 32.0 for sum_val in avg_data['probability_sums']]
+            
+            # Find the class with highest average probability
+            max_prob = max(avg_probs)
+            predicted_class = avg_probs.index(max_prob) + 1
+            
+            # Create properties with average probabilities
+            properties = avg_data['properties'].copy()
+            properties['volume_bin'] = predicted_class
+            properties['volume_class'] = predicted_class
+            
+            # Add average probabilities
+            for i in range(1, 6):
+                properties[f'proba_{i}'] = avg_probs[i-1]
+            properties['proba_top'] = max_prob
+            
+            # Mark as average layer
+            properties['is_average_layer'] = True
+            
+            average_features.append({
+                'type': 'Feature',
+                'geometry': avg_data['geometry'],
+                'properties': properties
+            })
+        
+        # Create average layer
+        average_geojson = {
+            'type': 'FeatureCollection',
+            'features': average_features
+        }
+        
+        return {
+            'name': 'average',
+            'geojson': clean_geojson(average_geojson),
+            'feature_count': len(average_features),
+            'is_prediction_layer': True,
+            'is_average_layer': True
+        }
+        
+    except Exception as e:
+        logging.error(f"Error calculating average layer: {e}")
+        return None
+
 def save_layers_to_gpkg(layers, filename=None):
     """
     Save multiple prediction layers into a single GPKG file.
@@ -2231,6 +2475,7 @@ def predict_multi():
       - seasons: csv of values in {winter,spring,summer,autumn}
       - week_types: csv of values in {weekday,weekend}
       - times_of_day: csv of values in {morning,afternoon,evening,night}
+      - include_average: boolean to include average layer (default: true)
 
     Returns:
       { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox }
@@ -2248,6 +2493,7 @@ def predict_multi():
         seasons = _parse_csv(request.args.get("seasons"), ["winter", "spring", "summer", "autumn"])
         week_types = _parse_csv(request.args.get("week_types"), ["weekday", "weekend"])
         times_of_day = _parse_csv(request.args.get("times_of_day"), ["morning", "afternoon", "evening", "night"])
+        include_average = request.args.get("include_average", "true").lower() == "true"
 
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
@@ -2256,23 +2502,41 @@ def predict_multi():
         # we will override Hour/is_weekend/time_of_day later per combination
         rep_ts = build_search_timestamp(seasons[0], week_types[0], times_of_day[0])
 
+        # Calculate total steps
+        total_combinations = len(seasons) * len(week_types) * len(times_of_day)
+        total_steps = total_combinations + 2  # +2 for feature extraction and average calculation
+        
+        # Clear terminal and start loading animation
+        print("\n", end="")  # New line to separate from previous output
+        start_loading_animation()
+        update_progress("starting", 0, total_steps, f"מתחיל חיזוי עבור {place or 'bbox'}")
+        
         # run pipeline ONCE
+        update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
         features_gdf, pipeline_metadata = run_feature_pipeline(
             place=place,
             bbox=bbox,
             timestamp=rep_ts.isoformat(),
         )
+        update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
 
         if features_gdf is None or len(features_gdf) == 0:
             return jsonify({"layers": [], "place": place, "bbox": bbox}), 200
 
+        # Start loading animation again for the prediction calculations
+        start_loading_animation()
         layers = []
 
         # prepare constant parts once
         # note: prepare_model_features will be run for each overridden combo
+        current_step = 3  # Start from step 3 (after feature extraction)
         for season in seasons:
             for week_type in week_types:
                 for tod in times_of_day:
+                    # Update progress
+                    update_progress("predicting", current_step, total_steps, 
+                                  f"מנבא עבור {season} - {week_type} - {tod}")
+                    
                     # override time-based features on a copy
                     gdf = features_gdf.copy()
                     sp = parse_search_parameters({
@@ -2319,6 +2583,26 @@ def predict_multi():
                         "feature_count": int(len(gdf_out)),
                         "is_prediction_layer": True,
                     })
+                    
+                    current_step += 1
+
+        # Calculate average layer if requested and we have multiple layers
+        if include_average and len(layers) > 1:
+            update_progress("calculating_average", current_step, total_steps, "מחשב שכבה ממוצעת")
+            average_layer = calculate_average_layer(layers)
+            if average_layer:
+                layers.insert(0, average_layer)  # Add average layer at the beginning
+                logging.info(f"Added average layer with {average_layer['feature_count']} features")
+            else:
+                logging.warning("Failed to calculate average layer")
+            current_step += 1
+
+        update_progress("completed", total_steps, total_steps, f"הושלם בהצלחה - {len(layers)} שכבות")
+        finish_progress(f"Completed - {len(layers)} layers")
+
+        # Log what we're returning
+        layer_names = [layer.get('name', 'unknown') for layer in layers]
+        logging.info(f"Returning {len(layers)} layers: {layer_names}")
 
         return json_response({
             "layers": layers,
@@ -2329,6 +2613,8 @@ def predict_multi():
 
     except Exception as e:
         import traceback
+        stop_loading_animation()
+        finish_progress("Error occurred")
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
@@ -2340,5 +2626,9 @@ if __name__ == "__main__":
     port = int(os.getenv("FLASK_PORT", "8000"))
     debug = os.getenv("FLASK_ENV", "development") == "development"
     
+    print("=" * 60)
     logging.info(f"Starting Flask development server on {host}:{port}")
+    print("=" * 60)
+    print("✅ Server is ready! Open your browser and start predicting!")
+    print("=" * 60)
     app.run(host=host, port=port, debug=debug)
