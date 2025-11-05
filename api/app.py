@@ -552,13 +552,27 @@ MODELS_LIST = [
     "cb_model_four_city.cbm"
 ]
 MODEL_NAME = MODELS_LIST[0]
+
 # Load the pre-trained CatBoost model
+# Try Vultr Object Storage first, fall back to local path
 MODEL_PATH = os.getenv(
-    "MODEL_PATH", 
+    "MODEL_PATH",
     os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
 )
 
 try:
+    # Import storage utilities
+    from storage_utils import download_model_from_vultr
+
+    # Try to download from Vultr if configured
+    vultr_path = download_model_from_vultr(MODEL_NAME)
+    if vultr_path:
+        MODEL_PATH = vultr_path
+        logging.info(f"Using model from Vultr Object Storage: {MODEL_PATH}")
+    else:
+        logging.info(f"Vultr storage not configured, using local model: {MODEL_PATH}")
+
+    # Load model (from Vultr cache or local path)
     model = CatBoostClassifier()
     model.load_model(MODEL_PATH)
     print("=" * 60)
@@ -2616,6 +2630,97 @@ def predict_multi():
         stop_loading_animation()
         finish_progress("Error occurred")
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+# =========================
+# Data Access Routes (Presigned URLs)
+# =========================
+
+@app.route("/data/presign", methods=["GET"])
+def data_presign():
+    """
+    Generate presigned URL for direct file access from Vultr.
+
+    Query Parameters:
+        path (str): Object path in bucket (e.g., "cogs/ndvi/tile_2023.tif")
+        expires (int, optional): Expiration time in seconds (default: 3600 = 1 hour)
+
+    Returns:
+        JSON with presigned URL
+    """
+    from storage_utils import get_vultr_storage
+
+    object_path = request.args.get("path")
+    expires_in = request.args.get("expires", 3600, type=int)
+
+    if not object_path:
+        return jsonify({"error": "Missing 'path' parameter"}), 400
+
+    if expires_in > 86400:  # Max 24 hours
+        return jsonify({"error": "expires cannot exceed 86400 seconds (24 hours)"}), 400
+
+    # Get storage client
+    storage = get_vultr_storage()
+    if not storage:
+        return jsonify({
+            "error": "S3 storage not configured",
+            "details": "Set USE_S3_STORAGE=true and provide credentials"
+        }), 503
+
+    # Check if file exists
+    if not storage.file_exists(object_path):
+        return jsonify({
+            "error": "File not found",
+            "path": object_path
+        }), 404
+
+    # Generate presigned URL
+    url = storage.generate_presigned_url(object_path, expires_in=expires_in)
+    if not url:
+        return jsonify({
+            "error": "Failed to generate presigned URL",
+            "path": object_path
+        }), 500
+
+    return jsonify({
+        "url": url,
+        "path": object_path,
+        "expires_in": expires_in,
+        "note": "Download directly from this URL. Do not proxy through API."
+    })
+
+
+@app.route("/data/list", methods=["GET"])
+def data_list():
+    """
+    List files in Vultr storage with optional prefix filter.
+
+    Query Parameters:
+        prefix (str, optional): Path prefix to filter (e.g., "cogs/", "models/")
+
+    Returns:
+        JSON with list of file paths
+    """
+    from storage_utils import get_vultr_storage
+
+    prefix = request.args.get("prefix", "")
+
+    # Get storage client
+    storage = get_vultr_storage()
+    if not storage:
+        return jsonify({
+            "error": "S3 storage not configured",
+            "details": "Set USE_S3_STORAGE=true and provide credentials"
+        }), 503
+
+    # List files
+    files = storage.list_files(prefix=prefix)
+
+    return jsonify({
+        "files": files,
+        "count": len(files),
+        "prefix": prefix if prefix else "(all)"
+    })
 
 
 

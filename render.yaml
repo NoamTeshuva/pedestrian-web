@@ -25,6 +25,19 @@ services:
         # after first deploy, replace with your actual frontend URL shown by Render
         value: https://pedestrian-frontend-web.onrender.com,http://localhost:3000
 
+      # Vultr Object Storage Configuration
+      # IMPORTANT: Set secrets (S3_ACCESS_KEY, S3_SECRET_KEY) via Render Dashboard only!
+      # Never commit secrets to git. Add them at: Dashboard → Service → Environment
+
+      - key: USE_S3_STORAGE
+        value: "true"  # Secrets are in Render Dashboard
+      - key: S3_ENDPOINT
+        value: "https://ams1.vultrobjects.com"
+      - key: S3_BUCKET
+        value: "pedestrian-data-prod"
+      - key: S3_REGION
+        value: "us-east-1"
+
   # =========================
   # Frontend (Static, Free)
   # =========================
