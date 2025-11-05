@@ -555,16 +555,28 @@ MODEL_NAME = MODELS_LIST[0]
 
 # Load the pre-trained CatBoost model
 # Try Vultr Object Storage first, fall back to local path
-MODEL_PATH = os.getenv(
-    "MODEL_PATH",
-    os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
-)
+MODEL_PATH_ENV = os.getenv("MODEL_PATH")
+
+if MODEL_PATH_ENV:
+    # If MODEL_PATH env var is set, use it (could be just filename or full path)
+    if os.path.isabs(MODEL_PATH_ENV) or os.path.sep in MODEL_PATH_ENV:
+        # Full path provided
+        MODEL_PATH = MODEL_PATH_ENV
+        MODEL_NAME = os.path.basename(MODEL_PATH_ENV)
+    else:
+        # Just filename provided
+        MODEL_NAME = MODEL_PATH_ENV
+        MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
+    logging.info(f"Using model from MODEL_PATH env var: {MODEL_NAME}")
+else:
+    # Use default from MODELS_LIST
+    MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
 
 try:
     # Import storage utilities
     from storage_utils import download_model_from_vultr
 
-    # Try to download from Vultr if configured
+    # Try to download from Vultr if configured (using the determined MODEL_NAME)
     vultr_path = download_model_from_vultr(MODEL_NAME)
     if vultr_path:
         MODEL_PATH = vultr_path
@@ -576,7 +588,7 @@ try:
     model = CatBoostClassifier()
     model.load_model(MODEL_PATH)
     print("=" * 60)
-    print("🚀 PEDESTRIAN VOLUME PREDICTION SERVER")
+    print("PEDESTRIAN VOLUME PREDICTION SERVER")
     print("=" * 60)
     logging.info(f"Successfully loaded CatBoost model from {MODEL_PATH}")
     print("=" * 60)
@@ -2734,6 +2746,6 @@ if __name__ == "__main__":
     print("=" * 60)
     logging.info(f"Starting Flask development server on {host}:{port}")
     print("=" * 60)
-    print("✅ Server is ready! Open your browser and start predicting!")
+    print("Server is ready! Open your browser at http://{host}:{port}")
     print("=" * 60)
     app.run(host=host, port=port, debug=debug)
