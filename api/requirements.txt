@@ -1,27 +1,33 @@
-# Web framework
-flask>=2.3.0
-flask-cors>=4.0.0
-gunicorn>=21.2.0
+# Web Framework
+Flask==3.0.0
+Flask-CORS==4.0.0
+Werkzeug==3.0.1
 
-# ML and data processing
-catboost>=1.2.0
-pandas>=2.0.0
-numpy>=1.24.0
+# Machine Learning
+catboost==1.2.2
 
-# Geospatial libraries
-geopandas>=0.13.0
-osmnx>=1.6.0
-shapely>=2.0.0
-fiona>=1.9.4
-rasterio>=1.3.0
-pyproj>=3.5.0
+# Geospatial Libraries
+osmnx==1.9.2
+geopandas==0.14.3
+shapely==2.0.3
+pyproj==3.6.1
+rasterio==1.3.9
 
-# Network analysis
-networkx>=3.1.0
+# Data Processing
+pandas==2.2.0
+numpy==1.26.3
 
-# Utilities
-requests>=2.31.0
-orjson>=3.9.2; python_version < "3.13"
+# Cloud Storage
+boto3==1.34.34
+botocore==1.34.34
 
-# Cloud storage (Vultr Object Storage - S3 compatible)
-boto3>=1.28.0
+# HTTP and API
+requests==2.31.0
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# Additional Dependencies
+networkx==3.2.1
+matplotlib==3.8.2
+scipy==1.12.0
