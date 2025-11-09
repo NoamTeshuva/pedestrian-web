@@ -24,7 +24,7 @@ def get_time_of_day(hour: int) -> str:
 
 def compute_time_features(gdf, timestamp=None):
     """
-    Add Hour, is_weekend, and time_of_day columns to `gdf` based on `timestamp`.
+    Add temporal features to `gdf` based on `timestamp`.
 
     Parameters
     ----------
@@ -38,6 +38,8 @@ def compute_time_features(gdf, timestamp=None):
     GeoDataFrame or DataFrame
         The same `gdf` with new columns:
           - Hour: int [0–23]
+          - Month: int [1–12]
+          - DayOfWeek: int [0–6] (Monday=0, Sunday=6)
           - is_weekend: 0 or 1
           - time_of_day: category ('morning','afternoon','evening','night')
     """
@@ -45,11 +47,15 @@ def compute_time_features(gdf, timestamp=None):
     ts = pd.to_datetime(timestamp) if timestamp is not None else pd.Timestamp.now()
 
     hour = ts.hour
-    weekend_flag = int(ts.weekday() >= 5)
+    month = ts.month
+    day_of_week = ts.weekday()  # Monday=0, Sunday=6
+    weekend_flag = int(day_of_week >= 5)
     tod = get_time_of_day(hour)
 
     gdf = gdf.copy()
     gdf["Hour"] = hour
+    gdf["Month"] = month
+    gdf["DayOfWeek"] = day_of_week
     gdf["is_weekend"] = weekend_flag
     gdf["time_of_day"] = tod
 

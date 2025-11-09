@@ -11,16 +11,39 @@ if os.getcwd() not in sys.path:
     sys.path.insert(0, os.getcwd())
 # ---------------------------------------------------------------------------
 
+# Load environment variables from .env file (for local development)
+try:
+    from dotenv import load_dotenv
+    # Load from parent directory (where .env is located)
+    env_path = os.path.join(os.path.dirname(app_dir), '.env')
+    load_dotenv(dotenv_path=env_path)
+except ImportError:
+    pass  # dotenv not installed (production might not need it)
+
 # Optional orjson shim (safe on Python 3.11/3.13 with or without orjson installed)
+import numpy as np
+
+def numpy_to_python(obj):
+    """Convert numpy types to Python native types for JSON serialization."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    raise TypeError(f"Type is not JSON serializable: {type(obj).__name__}")
+
 try:
     import orjson as _orjson
     def fast_dumps(obj) -> bytes:
-        return _orjson.dumps(obj)  # returns bytes
+        return _orjson.dumps(obj, default=numpy_to_python)  # returns bytes
 except Exception:
     import json as _json
     def fast_dumps(obj) -> bytes:
         # compact, UTF-8 JSON bytes (approximate orjson defaults)
-        return _json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return _json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=numpy_to_python).encode("utf-8")
 
 from flask import Flask, request, jsonify, Response, send_file, after_this_request
 from flask_cors import CORS
@@ -558,14 +581,14 @@ MODEL_NAME = MODELS_LIST[0]
 MODEL_PATH_ENV = os.getenv("MODEL_PATH")
 
 if MODEL_PATH_ENV:
-    # If MODEL_PATH env var is set, use it (could be just filename or full path)
-    if os.path.isabs(MODEL_PATH_ENV) or os.path.sep in MODEL_PATH_ENV:
-        # Full path provided
+    # If MODEL_PATH env var is set, use it (could be just filename or relative path)
+    if os.path.isabs(MODEL_PATH_ENV):
+        # Absolute path provided (e.g., /path/to/model.cbm)
         MODEL_PATH = MODEL_PATH_ENV
         MODEL_NAME = os.path.basename(MODEL_PATH_ENV)
     else:
-        # Just filename provided
-        MODEL_NAME = MODEL_PATH_ENV
+        # Relative path or filename (e.g., "model.cbm" or "production/model.cbm")
+        MODEL_NAME = MODEL_PATH_ENV  # Keep relative path for Vultr
         MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", MODEL_NAME)
     logging.info(f"Using model from MODEL_PATH env var: {MODEL_NAME}")
 else:
@@ -2390,9 +2413,16 @@ def calculate_average_layer(layers):
                 
             for feature in layer['geojson']['features']:
                 # Use osmid, edge_id, or geometry as unique identifier
-                feature_id = (feature.get('properties', {}).get('osmid') or 
-                            feature.get('properties', {}).get('edge_id') or 
-                            str(feature.get('geometry', {})))
+                # Convert to hashable type (tuple if list, or string)
+                osmid = feature.get('properties', {}).get('osmid')
+                edge_id = feature.get('properties', {}).get('edge_id')
+
+                if osmid is not None:
+                    feature_id = tuple(osmid) if isinstance(osmid, list) else osmid
+                elif edge_id is not None:
+                    feature_id = tuple(edge_id) if isinstance(edge_id, list) else edge_id
+                else:
+                    feature_id = str(feature.get('geometry', {}))
                 
                 if feature_id not in feature_averages:
                     feature_averages[feature_id] = {
@@ -2587,7 +2617,8 @@ def predict_multi():
                     y_proba = model.predict_proba(pool)
 
                     gdf_out = gdf.copy()
-                    gdf_out["volume_class"] = y_pred.astype(int)
+                    # Convert model classes (0-4) to user-facing classes (1-5)
+                    gdf_out["volume_class"] = (y_pred.astype(int) + 1).astype(int)
                     # add probabilities
                     if hasattr(y_proba, 'ndim') and y_proba.ndim > 1:
                         for i in range(y_proba.shape[1]):
@@ -2603,11 +2634,25 @@ def predict_multi():
                     layer_name = f"{season}_{week_type}_{tod}"
                     # serialize to clean GeoJSON
                     clean_data = clean_geojson(gdf_out.__geo_interface__)
+
+                    # Extract weather metadata (average across all streets in this layer)
+                    weather_metadata = {}
+                    if 'temperature' in gdf_out.columns:
+                        weather_metadata['temperature'] = float(gdf_out['temperature'].mean())
+                    if 'precipitation' in gdf_out.columns:
+                        weather_metadata['precipitation'] = float(gdf_out['precipitation'].mean())
+                    if 'wind_speed' in gdf_out.columns:
+                        weather_metadata['wind_speed'] = float(gdf_out['wind_speed'].mean())
+
                     layers.append({
                         "name": layer_name,
                         "geojson": clean_data,
                         "feature_count": int(len(gdf_out)),
                         "is_prediction_layer": True,
+                        "weather": weather_metadata,
+                        "season": season,
+                        "week_type": week_type,
+                        "time_of_day": tod,
                     })
                     
                     current_step += 1

@@ -1,0 +1,12 @@
+{
+  "name": "pedestrian-volume-frontend",
+  "version": "1.0.0",
+  "description": "Pedestrian Volume Prediction Frontend",
+  "scripts": {
+    "start": "live-server --port=3000 --host=127.0.0.1 --entry-file=index.html",
+    "dev": "live-server --port=3000 --host=127.0.0.1 --entry-file=index.html"
+  },
+  "devDependencies": {
+    "live-server": "^1.2.2"
+  }
+}

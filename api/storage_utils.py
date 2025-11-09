@@ -10,6 +10,7 @@ from pathlib import Path
 
 try:
     import boto3
+    from botocore.config import Config
     from botocore.exceptions import ClientError, NoCredentialsError
     BOTO3_AVAILABLE = True
 except ImportError:
@@ -55,13 +56,17 @@ class VultrStorage:
                 "S3_ACCESS_KEY, S3_SECRET_KEY, S3_ENDPOINT, S3_BUCKET"
             )
 
-        # Initialize S3 client
+        # Initialize S3 client with v4 signatures and virtual-host addressing for Vultr
         self.s3_client = boto3.client(
             's3',
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             endpoint_url=self.endpoint_url,
-            region_name=self.region
+            region_name=self.region,
+            config=Config(
+                signature_version='s3v4',
+                s3={'addressing_style': 'virtual'}
+            )
         )
 
         logger.info(f"Initialized Vultr storage client: bucket={self.bucket_name}, endpoint={self.endpoint_url}")

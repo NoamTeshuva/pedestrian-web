@@ -40,6 +40,7 @@ env/
 venv/
 ENV/
 .env
+.env.local
 .venv
 
 # Frontend node modules
@@ -53,6 +54,7 @@ lerna-debug.log*
 # IDEs
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
@@ -89,3 +91,13 @@ logs/
 # Large files that should use Git LFS (tracked via LFS, not ignored)
 # *.cbm - tracked via Git LFS in .gitattributes
 # *.pkl - tracked via Git LFS in .gitattributes
+
+# Local model storage (models are in Vultr Object Storage)
+PRODUCTION_MODEL/
+/tmp/models/
+api/models/*.cbm
+api/models/*.pkl
+
+# Test files
+test_*.py
+*_test.py

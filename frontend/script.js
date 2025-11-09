@@ -80,6 +80,10 @@ class PedestrianPredictionApp {
 		this.downloadBtnText = document.getElementById("downloadBtnText");
 		this.downloadSpinner = document.getElementById("downloadSpinner");
 
+		// Weather summary elements
+		this.weatherSummarySection = document.getElementById("weatherSummarySection");
+		this.weatherSummaryContent = document.getElementById("weatherSummaryContent");
+
 		// Status and details
 		this.statusMessage = document.getElementById("statusMessage");
 		this.detailsPanel = document.getElementById("detailsPanel");
@@ -496,6 +500,7 @@ class PedestrianPredictionApp {
 	async navigateToCity(city) {
 		this.layerSelectionSection.classList.add("hidden");
 		this.downloadSection.classList.add("hidden");
+		this.weatherSummarySection.classList.add("hidden");
 		this.clearCurrentLayer();
 
 		try {
@@ -569,7 +574,7 @@ class PedestrianPredictionApp {
 			const layers = Array.isArray(data.layers) ? data.layers : [];
 			this.allLayersData = layers.map((layer) => {
 				const name = String(layer.name || "");
-				
+
 				// Handle average layer differently
 				if (name === "average") {
 					return {
@@ -583,7 +588,7 @@ class PedestrianPredictionApp {
 						},
 					};
 				}
-				
+
 				// Handle regular layers
 				const [season, weekType, timeOfDay] = name.split("_");
 				return {
@@ -598,6 +603,7 @@ class PedestrianPredictionApp {
 						location: data.place || place || "",
 						timestamp: new Date().toISOString(),
 					},
+					weather: layer.weather || {},
 				};
 			});
 
@@ -607,6 +613,7 @@ class PedestrianPredictionApp {
 			this.hideProgress();
 			if (this.allLayersData.length > 0) {
 				this.displayLayerSelection(this.allLayersData);
+				this.displayWeatherSummary(this.allLayersData);
 				this.downloadSection.classList.remove("hidden");
 				this.showStatusMessage(`נטענו ${this.allLayersData.length} שכבות בהצלחה`, "success");
 				await this.createCombinedGpkg(data.place || place || "");
@@ -1038,6 +1045,98 @@ class PedestrianPredictionApp {
 	}
 
 	/**
+	 * Display weather summary for all layers
+	 */
+	displayWeatherSummary(layers) {
+		// Filter out layers without weather data
+		const layersWithWeather = layers.filter(
+			(layer) => layer.weather && Object.keys(layer.weather).length > 0
+		);
+
+		if (layersWithWeather.length === 0) {
+			this.weatherSummarySection.classList.add("hidden");
+			return;
+		}
+
+		// Show the section
+		this.weatherSummarySection.classList.remove("hidden");
+
+		// Group by season and time_of_day for a cleaner display
+		const weatherBySeason = {};
+
+		layersWithWeather.forEach((layer) => {
+			const season = layer.metadata?.season || "unknown";
+			const timeOfDay = layer.metadata?.timeOfDay || "unknown";
+
+			if (!weatherBySeason[season]) {
+				weatherBySeason[season] = {};
+			}
+			if (!weatherBySeason[season][timeOfDay]) {
+				weatherBySeason[season][timeOfDay] = layer.weather;
+			}
+		});
+
+		// Create the weather summary HTML
+		let html = '<div style="display: grid; gap: 10px;">';
+
+		const seasons = ["winter", "spring", "summer", "autumn"];
+		const timesOfDay = ["morning", "afternoon", "evening", "night"];
+
+		seasons.forEach((season) => {
+			if (weatherBySeason[season]) {
+				html += `
+					<div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
+						<h4 style="margin: 0 0 8px 0; color: #333;">${this.translateSeason(
+							season
+						)}</h4>
+						<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
+				`;
+
+				timesOfDay.forEach((tod) => {
+					if (weatherBySeason[season][tod]) {
+						const weather = weatherBySeason[season][tod];
+						html += `
+							<div style="background: white; padding: 8px; border-radius: 4px; border: 1px solid #dee2e6;">
+								<strong>${this.translateTimeOfDay(tod)}</strong><br/>
+								${
+									weather.temperature !== undefined
+										? `<span style="font-size: 0.9em;">🌡️ ${this.formatTemp(
+												weather.temperature
+										  )}</span><br/>`
+										: ""
+								}
+								${
+									weather.precipitation !== undefined
+										? `<span style="font-size: 0.9em;">💧 ${this.formatPrecip(
+												weather.precipitation
+										  )}</span><br/>`
+										: ""
+								}
+								${
+									weather.wind_speed !== undefined
+										? `<span style="font-size: 0.9em;">💨 ${this.formatWind(
+												weather.wind_speed
+										  )}</span>`
+										: ""
+								}
+							</div>
+						`;
+					}
+				});
+
+				html += `
+						</div>
+					</div>
+				`;
+			}
+		});
+
+		html += "</div>";
+
+		this.weatherSummaryContent.innerHTML = html;
+	}
+
+	/**
 	 * Display a specific layer on the map
 	 */
 	displayLayer(layerName) {
@@ -1174,12 +1273,12 @@ class PedestrianPredictionApp {
 	 */
 	bindFeaturePopup(feature, layer) {
 		const props = feature.properties || {};
-		
+
 		// Check if this is an average layer feature
 		const isAverageLayer = props.is_average_layer === true || props.average_from_layers !== undefined;
-		
+
 		const popupContent = `
-			<div style="direction: rtl; text-align: right; min-width: 250px;">
+			<div style="direction: rtl; text-align: right; min-width: 280px;">
 				<h3 style="margin: 0 0 10px 0; color: #333;">
 					${props.name || "רחוב ללא שם"}
 				</h3>
@@ -1194,6 +1293,7 @@ class PedestrianPredictionApp {
 				</div>
 
 				<div style="background: #f8f9fa; padding: 10px; border-radius: 6px;">
+					<!-- Street Characteristics -->
 					<p style="margin: 5px 0;"><strong>סוג רחוב:</strong> ${
 						this.translateHighway(props.highway) || "לא ידוע"
 					}</p>
@@ -1201,14 +1301,23 @@ class PedestrianPredictionApp {
 						this.translateLandUse(props.land_use) || "לא ידוע"
 					}</p>
 
-
-					<div style="font-size: 0.85em; color: #666; margin-top: 6px;">
-						<p style="margin: 3px 0;"><strong>Betweenness:</strong> ${this.formatProb(
+					<!-- Network Metrics -->
+					<div style="font-size: 0.85em; color: #666; margin-top: 8px;">
+						<p style="margin: 2px 0; font-weight: bold; color: #333;">מדדי רשת:</p>
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>Betweenness:</strong> ${this.formatProb(
 							props.edge_betweenness ?? props.betweenness
 						)}</p>
-						<p style="margin: 3px 0;"><strong>Closeness:</strong> ${this.formatProb(
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>Closeness:</strong> ${this.formatProb(
 							props.edge_closeness ?? props.closeness
 						)}</p>
+					</div>
+
+					<!-- Environmental Features -->
+					<div style="font-size: 0.85em; color: #666; margin-top: 8px;">
+						<p style="margin: 2px 0; font-weight: bold; color: #333;">מאפייני סביבה:</p>
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>כיסוי עצים:</strong> ${this.formatPercent(props.sensor_canopy_pct)}</p>
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>מורכבות שטח:</strong> ${this.formatNormalized(props.terrain_complexity)}</p>
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>מיקום טופוגרפי:</strong> ${this.formatNormalized(props.topographic_position)}</p>
 					</div>
 
 					<hr style="margin: 10px 0; border: none; border-top: 1px solid #dee2e6;">
@@ -1227,7 +1336,7 @@ class PedestrianPredictionApp {
 		`;
 
 		layer.bindPopup(popupContent, {
-			maxWidth: 350,
+			maxWidth: 400,
 			className: "custom-popup",
 			autoPan: true,
 			autoPanPaddingTopLeft: [50, 50],
@@ -1273,6 +1382,41 @@ class PedestrianPredictionApp {
 	formatProb(val) {
 		const n = Number(val);
 		return Number.isFinite(n) ? n.toFixed(5) : "לא ידוע";
+	}
+
+	formatPercent(val) {
+		const n = Number(val);
+		return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : "לא ידוע";
+	}
+
+	formatNormalized(val) {
+		const n = Number(val);
+		return Number.isFinite(n) ? n.toFixed(2) : "לא ידוע";
+	}
+
+	formatTemp(val) {
+		const n = Number(val);
+		return Number.isFinite(n) ? `${n.toFixed(1)}°C` : "לא ידוע";
+	}
+
+	formatPrecip(val) {
+		const n = Number(val);
+		return Number.isFinite(n) ? `${n.toFixed(1)} מ"מ` : "לא ידוע";
+	}
+
+	formatWind(val) {
+		const n = Number(val);
+		return Number.isFinite(n) ? `${n.toFixed(1)} קמ"ש` : "לא ידוע";
+	}
+
+	translateTimeOfDay(timeOfDay) {
+		const translations = {
+			morning: "בוקר",
+			afternoon: "צהריים",
+			evening: "ערב",
+			night: "לילה",
+		};
+		return translations[timeOfDay] || timeOfDay;
 	}
 
 

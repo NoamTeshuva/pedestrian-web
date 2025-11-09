@@ -33,7 +33,7 @@ def log_with_clear(message: str):
     logging.info(message)
 
 from .landuse_features import (
-    get_landuse_polygons, 
+    get_landuse_polygons,
     compute_landuse_edges,
     LandUseError
 )
@@ -45,26 +45,49 @@ from .highway_features import (
     compute_highway,
     HighwayError
 )
-from .time_features import compute_time_features
+from .time_features import compute_time_features, get_time_of_day
+from .environmental_features import (
+    compute_environmental_features,
+    EnvironmentalError
+)
+from .weather_features import (
+    compute_weather_features,
+    WeatherError
+)
 
 # Configuration
 class PipelineConfig:
     """Configuration constants for the feature extraction pipeline."""
-    
-    # Model feature columns in expected order
+
+    # PRODUCTION MODEL feature columns in expected order (15 features)
+    # cb_model_3city_with_weather.cbm expects these exact features in this order
     FEATURE_COLUMNS = [
-        "length",           # Edge length in meters
-        "betweenness",      # Betweenness centrality
-        "closeness",        # Closeness centrality  
-        "Hour",            # Hour of day (0-23)
-        "is_weekend",      # Boolean weekend flag
-        "time_of_day",     # Categorical: morning/afternoon/evening/night
-        "land_use",        # Categorical: residential/retail/commercial/other
-        "highway",         # Categorical: primary/secondary/residential/etc
+        # TEMPORAL (5)
+        "Hour",                    # Hour of day (0-23)
+        "Month",                   # Month (1-12)
+        "DayOfWeek",              # Day of week (0-6, Monday=0)
+        "is_weekend",             # Boolean weekend flag (0/1)
+        "time_of_day",            # Categorical: morning/afternoon/evening/night
+
+        # NETWORK (4)
+        "betweenness",            # Betweenness centrality (0-1)
+        "closeness",              # Closeness centrality (0-1)
+        "land_use",               # Categorical: residential/retail/commercial/other
+        "highway",                # Categorical: primary/secondary/residential/etc
+
+        # ENVIRONMENTAL (3)
+        "sensor_canopy_pct",      # Tree canopy coverage (0-1)
+        "terrain_complexity",     # Terrain complexity index (0-1)
+        "topographic_position",   # Topographic position index (0-1)
+
+        # WEATHER (3)
+        "temperature",            # Temperature in Celsius
+        "precipitation",          # Precipitation in mm
+        "wind_speed",             # Wind speed in km/h
     ]
-    
-    # Categorical features for model processing
-    CATEGORICAL_COLUMNS = ["time_of_day", "land_use", "highway"]
+
+    # Categorical features for model processing (must match production model training)
+    CATEGORICAL_COLUMNS = ["Month", "DayOfWeek", "is_weekend", "time_of_day", "land_use", "highway"]
     
     # Network processing settings
     NETWORK_TYPE = "walk"
@@ -243,12 +266,50 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
         result_gdf = compute_time_features(result_gdf, timestamp=timestamp)
         extraction_times['temporal'] = time.time() - start_time
         log_with_clear(f"Temporal extraction completed in {extraction_times['temporal']:.2f}s")
-        
+
+        # 5. Extract environmental features
+        start_time = time.time()
+        try:
+            result_gdf = compute_environmental_features(result_gdf)
+            extraction_times['environmental'] = time.time() - start_time
+            log_with_clear(f"Environmental extraction completed in {extraction_times['environmental']:.2f}s")
+        except EnvironmentalError as e:
+            logging.error(f"Environmental extraction failed: {e.message}")
+            # Graceful degradation: assign default environmental values
+            result_gdf['sensor_canopy_pct'] = 0.3
+            result_gdf['terrain_complexity'] = 0.5
+            result_gdf['topographic_position'] = 0.5
+            extraction_times['environmental'] = time.time() - start_time
+
+        # 6. Extract weather features
+        start_time = time.time()
+        try:
+            # Extract time_of_day from timestamp for weather averaging
+            time_of_day_value = None
+            if timestamp:
+                ts = pd.to_datetime(timestamp) if isinstance(timestamp, str) else timestamp
+                time_of_day_value = get_time_of_day(ts.hour)
+
+            result_gdf = compute_weather_features(
+                result_gdf,
+                timestamp=timestamp,
+                time_of_day=time_of_day_value
+            )
+            extraction_times['weather'] = time.time() - start_time
+            log_with_clear(f"Weather extraction completed in {extraction_times['weather']:.2f}s")
+        except WeatherError as e:
+            logging.error(f"Weather extraction failed: {e.message}")
+            # Graceful degradation: assign default weather values
+            result_gdf['temperature'] = 20.0
+            result_gdf['precipitation'] = 0.0
+            result_gdf['wind_speed'] = 10.0
+            extraction_times['weather'] = time.time() - start_time
+
         # Log total extraction time
         total_time = sum(extraction_times.values())
         log_with_clear(f"Total feature extraction completed in {total_time:.2f}s")
         log_with_clear(f"Extraction breakdown: {extraction_times}")
-        
+
         return result_gdf
         
     except Exception as e:
@@ -419,14 +480,25 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
         
         # Fill any remaining nulls with defaults
         defaults = {
-            'length': 0.0,
-            'betweenness': 0.0,
-            'closeness': 0.0,
+            # Temporal features
             'Hour': 12,  # Default to noon
+            'Month': 6,  # Default to June
+            'DayOfWeek': 2,  # Default to Wednesday
             'is_weekend': 0,
             'time_of_day': 'afternoon',
+            # Network features
+            'betweenness': 0.0,
+            'closeness': 0.0,
             'land_use': 'other',
-            'highway': 'unclassified'
+            'highway': 'unclassified',
+            # Environmental features
+            'sensor_canopy_pct': 0.3,
+            'terrain_complexity': 0.5,
+            'topographic_position': 0.5,
+            # Weather features
+            'temperature': 20.0,
+            'precipitation': 0.0,
+            'wind_speed': 10.0
         }
         
         for col, default_val in defaults.items():
