@@ -2784,13 +2784,14 @@ def data_list():
 if __name__ == "__main__":
     # Development server; use Gunicorn in production
     import os
-    host = os.getenv("FLASK_HOST", "127.0.0.1")
-    port = int(os.getenv("FLASK_PORT", "8000"))
+    # Render requires binding to 0.0.0.0 and uses PORT env var
+    host = os.getenv("FLASK_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", os.getenv("FLASK_PORT", "8000")))
     debug = os.getenv("FLASK_ENV", "development") == "development"
     
     print("=" * 60)
     logging.info(f"Starting Flask development server on {host}:{port}")
     print("=" * 60)
-    print("Server is ready! Open your browser at http://{host}:{port}")
+    print(f"Server is ready! Open your browser at http://{host}:{port}")
     print("=" * 60)
     app.run(host=host, port=port, debug=debug)
