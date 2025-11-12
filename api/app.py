@@ -1641,6 +1641,24 @@ def predict_gpkg():
 
 
 # Keep existing routes unchanged
+@app.route("/", methods=["GET"])
+def index():
+    """Root endpoint - service information."""
+    status = "loaded" if model is not None else "not_loaded"
+    return jsonify({
+        "service": "pedestrian-api",
+        "status": status,
+        "model_env": os.getenv("MODEL_PATH"),
+        "endpoints": ["/ping", "/health", "/predict", "/predict-batch", "/data/list", "/data/presign"]
+    }), 200
+
+
+@app.route("/favicon.ico")
+def favicon():
+    """Return empty 204 so browsers stop logging 404s."""
+    return ("", 204)
+
+
 @app.route("/ping", methods=["GET"])
 def ping():
     """Health check endpoint."""
