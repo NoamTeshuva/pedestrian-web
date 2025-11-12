@@ -2579,6 +2579,35 @@ def predict_multi():
         if features_gdf is None or len(features_gdf) == 0:
             return jsonify({"layers": [], "place": place, "bbox": bbox}), 200
 
+        # CRITICAL: Extract weather for each unique (season, time_of_day) combination
+        # Weather varies by BOTH season AND time of day
+        from feature_engineering.weather_features import compute_weather_features
+        from datetime import datetime
+
+        seasonal_weather = {}
+        unique_combinations = set((s, t) for s in seasons for t in times_of_day)
+
+        logging.info(f"Pre-fetching weather for {len(unique_combinations)} unique season/time combinations")
+        for season, time_of_day in unique_combinations:
+            # Create a timestamp for this season
+            season_ts = build_search_timestamp(season, "weekday", time_of_day)
+            # Extract weather for this season and time of day (averaged across 5 days and specific hours)
+            weather_gdf = compute_weather_features(
+                features_gdf.copy(),
+                timestamp=season_ts,
+                time_of_day=time_of_day
+            )
+            # Store the weather columns in nested dict
+            if season not in seasonal_weather:
+                seasonal_weather[season] = {}
+
+            seasonal_weather[season][time_of_day] = {
+                'temperature': weather_gdf['temperature'].iloc[0] if len(weather_gdf) > 0 else 20.0,
+                'precipitation': weather_gdf['precipitation'].iloc[0] if len(weather_gdf) > 0 else 0.0,
+                'wind_speed': weather_gdf['wind_speed'].iloc[0] if len(weather_gdf) > 0 else 10.0
+            }
+            logging.info(f"Extracted {season}/{time_of_day} weather: {seasonal_weather[season][time_of_day]}")
+
         # Start loading animation again for the prediction calculations
         start_loading_animation()
         layers = []
@@ -2603,6 +2632,12 @@ def predict_multi():
                     gdf['Hour'] = sp['features']['Hour']
                     gdf['is_weekend'] = sp['features']['is_weekend']
                     gdf['time_of_day'] = sp['features']['time_of_day']
+
+                    # CRITICAL: Apply season AND time-of-day specific weather data
+                    weather_data = seasonal_weather.get(season, {}).get(tod, {})
+                    gdf['temperature'] = weather_data.get('temperature', 20.0)
+                    gdf['precipitation'] = weather_data.get('precipitation', 0.0)
+                    gdf['wind_speed'] = weather_data.get('wind_speed', 10.0)
 
                     # prepare and predict
                     model_features = prepare_model_features(gdf)

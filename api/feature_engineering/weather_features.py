@@ -38,7 +38,7 @@ def get_season(date: datetime) -> str:
     Returns
     -------
     str
-        Season name: 'winter', 'spring', 'summer', 'fall'
+        Season name: 'winter', 'spring', 'summer', 'autumn'
     """
     month = date.month
     if month in [12, 1, 2]:
@@ -48,59 +48,89 @@ def get_season(date: datetime) -> str:
     elif month in [6, 7, 8]:
         return 'summer'
     else:  # 9, 10, 11
-        return 'fall'
+        return 'autumn'
 
 
-def get_weather_fetch_date(target_timestamp: datetime) -> Tuple[datetime, str]:
+def get_seasonal_sample_dates(target_timestamp: datetime, n_samples: int = 5) -> list:
     """
-    Determine which date to fetch weather for based on season logic.
+    Get multiple representative dates from the target season for averaging.
 
-    Logic:
-    - If target is in current season → Use last week (7 days ago)
-    - If target is in different season → Use same date from last occurrence of that season
+    This provides more robust seasonal weather by averaging across multiple days
+    rather than relying on a single day's weather.
 
     Parameters
     ----------
     target_timestamp : datetime
         The timestamp user is requesting prediction for
+    n_samples : int
+        Number of sample dates to fetch from the season (default 5)
 
     Returns
     -------
-    tuple
-        (fetch_date, reason) - Date to fetch weather for and explanation
+    list
+        List of datetime objects representing different days in the target season
     """
     now = datetime.now()
     target_season = get_season(target_timestamp)
+
+    # Get the 3 months that belong to this season
+    season_months = {
+        'winter': [12, 1, 2],
+        'spring': [3, 4, 5],
+        'summer': [6, 7, 8],
+        'autumn': [9, 10, 11]
+    }
+
+    months = season_months[target_season]
+    sample_dates = []
+
+    # For each month in the season, sample from early, mid, and late parts
+    # Always use last year's complete season to ensure all dates are in the past
+    base_year = now.year
+
+    # Determine which year to sample from
+    # If current month is in the target season and we're past mid-season, use this year
+    # Otherwise, go back one year to ensure complete historical data
     current_season = get_season(now)
-
-    if target_season == current_season:
-        # Same season: use last week's weather
-        fetch_date = now - timedelta(days=7)
-        reason = f"current_{current_season}"
-        logging.info(f"Same season ({current_season}): fetching weather from 7 days ago")
+    if current_season == target_season:
+        # Same season: check if we have enough historical data
+        # Use last year's season to get complete data
+        year_offset = 1
     else:
-        # Different season: use last occurrence of that season
-        # Go back to same month/day in previous year(s) until we find that season
-        year_offset = 0
-        while True:
-            candidate = target_timestamp.replace(year=now.year - year_offset)
-            if candidate > now:
-                # Future date, go back one more year
-                year_offset += 1
-                continue
-            if get_season(candidate) == target_season:
-                fetch_date = candidate
-                reason = f"last_{target_season}"
-                logging.info(f"Different season: fetching {target_season} weather from {fetch_date.date()}")
-                break
-            year_offset += 1
-            if year_offset > 5:
-                # Safety: fallback to 1 year ago if something goes wrong
-                fetch_date = target_timestamp.replace(year=now.year - 1)
-                reason = "fallback"
-                break
+        # Different season: check if that season has occurred this year yet
+        # For example, if today is Nov 2025 and we want summer, use 2025
+        # If today is Nov 2025 and we want winter (Dec-Feb), use 2024
+        if months[0] == 12:  # Winter season starts in December
+            # Winter spans Dec-Jan-Feb, need to check carefully
+            if now.month >= 3:  # After February, last winter is Dec prev year to Feb this year
+                year_offset = 1  # Use last year's December
+            else:  # Jan-Feb, we're in winter now
+                year_offset = 1  # Use previous winter
+        else:
+            # For other seasons, if the latest month of the season hasn't passed yet, go back a year
+            if now.month < months[2]:
+                year_offset = 1
+            else:
+                year_offset = 0
 
-    return fetch_date, reason
+    # Always go back at least one year to ensure historical data availability
+    year_offset = 1
+    sample_year = base_year - year_offset
+
+    # Sample from different days across the season
+    # Early season
+    sample_dates.append(datetime(sample_year, months[0], 10))
+    # Mid-early season
+    sample_dates.append(datetime(sample_year, months[1], 5))
+    # Mid season
+    sample_dates.append(datetime(sample_year, months[1], 15))
+    # Mid-late season
+    sample_dates.append(datetime(sample_year, months[1], 25))
+    # Late season
+    sample_dates.append(datetime(sample_year, months[2], 20))
+
+    logging.info(f"Sampling {target_season} weather from {len(sample_dates)} dates in {sample_year}")
+    return sample_dates[:n_samples]
 
 
 def get_time_of_day_hours(time_of_day: str) -> list:
@@ -155,10 +185,13 @@ def get_location_center(gdf: gpd.GeoDataFrame) -> Tuple[float, float]:
 
 
 def fetch_weather_from_open_meteo(lat: float, lon: float,
-                                   fetch_date: datetime,
+                                   fetch_dates: list,
                                    target_hours: list) -> Dict[str, float]:
     """
-    Fetch historical weather data from Open-Meteo API and average across multiple hours.
+    Fetch historical weather data from Open-Meteo API and average across multiple dates and hours.
+
+    This provides more robust seasonal weather by sampling multiple days within the season
+    rather than relying on a single day's weather.
 
     Open-Meteo provides:
     - Free historical weather back to 1940
@@ -171,8 +204,8 @@ def fetch_weather_from_open_meteo(lat: float, lon: float,
         Latitude in decimal degrees
     lon : float
         Longitude in decimal degrees
-    fetch_date : datetime
-        Date to fetch weather for
+    fetch_dates : list
+        List of datetime objects to fetch weather for and average
     target_hours : list
         List of hours (0-23) to fetch and average weather for
 
@@ -186,65 +219,76 @@ def fetch_weather_from_open_meteo(lat: float, lon: float,
     WeatherError
         If API request fails
     """
+    all_temp_values = []
+    all_precip_values = []
+    all_wind_values = []
+
+    successful_fetches = 0
+
     try:
-        # Open-Meteo Archive API (historical data)
-        url = "https://archive-api.open-meteo.com/v1/archive"
+        for fetch_date in fetch_dates:
+            try:
+                # Open-Meteo Archive API (historical data)
+                url = "https://archive-api.open-meteo.com/v1/archive"
 
-        # Format date for API (YYYY-MM-DD)
-        date_str = fetch_date.strftime("%Y-%m-%d")
+                # Format date for API (YYYY-MM-DD)
+                date_str = fetch_date.strftime("%Y-%m-%d")
 
-        params = {
-            "latitude": lat,
-            "longitude": lon,
-            "start_date": date_str,
-            "end_date": date_str,
-            "hourly": "temperature_2m,precipitation,wind_speed_10m",
-            "timezone": "auto"
-        }
+                params = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "start_date": date_str,
+                    "end_date": date_str,
+                    "hourly": "temperature_2m,precipitation,wind_speed_10m",
+                    "timezone": "auto"
+                }
 
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
+                response = requests.get(url, params=params, timeout=10)
+                response.raise_for_status()
 
-        data = response.json()
+                data = response.json()
 
-        # Extract hourly data
-        hourly = data.get("hourly", {})
-        times = hourly.get("time", [])
-        temperatures = hourly.get("temperature_2m", [])
-        precipitations = hourly.get("precipitation", [])
-        wind_speeds = hourly.get("wind_speed_10m", [])
+                # Extract hourly data
+                hourly = data.get("hourly", {})
+                temperatures = hourly.get("temperature_2m", [])
+                precipitations = hourly.get("precipitation", [])
+                wind_speeds = hourly.get("wind_speed_10m", [])
 
-        # Collect weather data for target hours
-        temp_values = []
-        precip_values = []
-        wind_values = []
+                # Collect weather data for target hours on this date
+                for hour in target_hours:
+                    if hour < len(temperatures) and temperatures[hour] is not None:
+                        all_temp_values.append(temperatures[hour])
+                        all_precip_values.append(precipitations[hour])
+                        all_wind_values.append(wind_speeds[hour])
 
-        for hour in target_hours:
-            if hour < len(temperatures):
-                temp_values.append(temperatures[hour])
-                precip_values.append(precipitations[hour])
-                wind_values.append(wind_speeds[hour])
+                successful_fetches += 1
 
-        # Calculate averages
-        temperature = sum(temp_values) / len(temp_values) if temp_values else 20.0
-        precipitation = sum(precip_values) / len(precip_values) if precip_values else 0.0
-        wind_speed = sum(wind_values) / len(wind_values) if wind_values else 10.0
+            except Exception as e:
+                logging.warning(f"Failed to fetch weather for {date_str}: {e}")
+                continue
 
-        logging.info(f"Open-Meteo weather fetched for {date_str} at hours {target_hours}: "
-                    f"temp={temperature:.1f}°C, precip={precipitation:.1f}mm, wind={wind_speed:.1f}km/h (averaged)")
+        # Calculate overall averages across all dates and hours
+        if all_temp_values:
+            temperature = sum(all_temp_values) / len(all_temp_values)
+            precipitation = sum(all_precip_values) / len(all_precip_values)
+            wind_speed = sum(all_wind_values) / len(all_wind_values)
 
-        return {
-            "temperature": temperature,
-            "precipitation": precipitation,
-            "wind_speed": wind_speed
-        }
+            logging.info(f"Seasonal weather averaged from {successful_fetches} dates, {len(all_temp_values)} total samples: "
+                        f"temp={temperature:.1f}°C, precip={precipitation:.1f}mm, wind={wind_speed:.1f}km/h")
 
-    except requests.exceptions.RequestException as e:
+            return {
+                "temperature": temperature,
+                "precipitation": precipitation,
+                "wind_speed": wind_speed
+            }
+        else:
+            raise WeatherError("No successful weather data fetched from any date")
+
+    except WeatherError:
+        raise
+    except Exception as e:
         logging.warning(f"Open-Meteo API request failed: {e}. Using seasonal defaults.")
         raise WeatherError(f"Weather API failed: {e}")
-    except (KeyError, ValueError, IndexError) as e:
-        logging.warning(f"Failed to parse Open-Meteo data: {e}. Using seasonal defaults.")
-        raise WeatherError(f"Weather parsing failed: {e}")
 
 
 def get_seasonal_defaults(timestamp: datetime) -> Dict[str, float]:
@@ -296,12 +340,13 @@ def compute_weather_features(gdf: gpd.GeoDataFrame,
                             timestamp: Optional[datetime] = None,
                             time_of_day: Optional[str] = None) -> gpd.GeoDataFrame:
     """
-    Add weather features to street edges using smart seasonal fetching.
+    Add weather features to street edges using seasonal averaging.
 
     Weather Strategy:
-    - Same season as now → Use last week's weather (most recent)
-    - Different season → Use last occurrence of that season
+    - Fetches weather from multiple representative dates within the target season
+    - Averages across 5 different days spanning the entire season (early, mid, late)
     - Averages weather across representative hours for the specified time_of_day
+    - Provides more robust seasonal representation than single-day sampling
 
     Uses Open-Meteo API (free, no key required, historical data back to 1940).
     Falls back to seasonal defaults if API is unavailable.
@@ -341,26 +386,27 @@ def compute_weather_features(gdf: gpd.GeoDataFrame,
         # Get location center
         lat, lon = get_location_center(gdf)
 
-        # Determine which date to fetch weather for
-        fetch_date, reason = get_weather_fetch_date(timestamp)
+        # Get multiple sample dates from the target season for averaging
+        fetch_dates = get_seasonal_sample_dates(timestamp, n_samples=5)
+        target_season = get_season(timestamp)
 
         # Get hours to average based on time_of_day
         if time_of_day:
             target_hours = get_time_of_day_hours(time_of_day)
-            logging.info(f"Weather strategy: {reason} | Target: {timestamp.date()}, Fetch: {fetch_date.date()}, "
-                        f"Time of day: {time_of_day} (hours: {target_hours})")
+            logging.info(f"Fetching {target_season} weather averaged from {len(fetch_dates)} dates, "
+                        f"time of day: {time_of_day} (hours: {target_hours})")
         else:
             target_hours = [timestamp.hour]
-            logging.info(f"Weather strategy: {reason} | Target: {timestamp.date()}, Fetch: {fetch_date.date()}")
+            logging.info(f"Fetching {target_season} weather averaged from {len(fetch_dates)} dates")
 
-        # Fetch weather from Open-Meteo
+        # Fetch weather from Open-Meteo (multi-date averaging)
         try:
             weather_data = fetch_weather_from_open_meteo(
-                lat, lon, fetch_date, target_hours
+                lat, lon, fetch_dates, target_hours
             )
         except WeatherError:
             # Fallback to seasonal defaults
-            logging.warning(f"Using seasonal defaults for {get_season(timestamp)}")
+            logging.warning(f"Using seasonal defaults for {target_season}")
             weather_data = get_seasonal_defaults(timestamp)
 
         # Add weather features to all edges
@@ -394,18 +440,24 @@ if __name__ == "__main__":
         'highway': ['primary']
     }, crs="EPSG:4326")
 
-    # Test 1: Current season (should use last week)
-    print("\n=== Test 1: Current Season ===")
-    result1 = compute_weather_features(test_gdf, datetime.now())
-    print(f"Temperature: {result1['temperature'].iloc[0]}°C")
-    print(f"Precipitation: {result1['precipitation'].iloc[0]}mm")
-    print(f"Wind Speed: {result1['wind_speed'].iloc[0]}km/h")
+    # Test 1: Winter season (should average from 5 winter dates)
+    print("\n=== Test 1: Winter Season ===")
+    result1 = compute_weather_features(test_gdf, datetime(2025, 1, 15, 9, 0, 0), time_of_day='morning')
+    print(f"Temperature: {result1['temperature'].iloc[0]:.1f}°C")
+    print(f"Precipitation: {result1['precipitation'].iloc[0]:.1f}mm")
+    print(f"Wind Speed: {result1['wind_speed'].iloc[0]:.1f}km/h")
 
-    # Test 2: Different season (should use last summer if winter, etc.)
-    print("\n=== Test 2: Different Season ===")
-    # If it's November, request July weather
+    # Test 2: Summer season (should average from 5 summer dates)
+    print("\n=== Test 2: Summer Season ===")
     test_date = datetime(2025, 7, 15, 14, 0, 0)
-    result2 = compute_weather_features(test_gdf, test_date)
-    print(f"Temperature: {result2['temperature'].iloc[0]}°C")
-    print(f"Precipitation: {result2['precipitation'].iloc[0]}mm")
-    print(f"Wind Speed: {result2['wind_speed'].iloc[0]}km/h")
+    result2 = compute_weather_features(test_gdf, test_date, time_of_day='afternoon')
+    print(f"Temperature: {result2['temperature'].iloc[0]:.1f}°C")
+    print(f"Precipitation: {result2['precipitation'].iloc[0]:.1f}mm")
+    print(f"Wind Speed: {result2['wind_speed'].iloc[0]:.1f}km/h")
+
+    # Test 3: Autumn season
+    print("\n=== Test 3: Autumn Season ===")
+    result3 = compute_weather_features(test_gdf, datetime(2025, 10, 15, 19, 0, 0), time_of_day='evening')
+    print(f"Temperature: {result3['temperature'].iloc[0]:.1f}°C")
+    print(f"Precipitation: {result3['precipitation'].iloc[0]:.1f}mm")
+    print(f"Wind Speed: {result3['wind_speed'].iloc[0]:.1f}km/h")
