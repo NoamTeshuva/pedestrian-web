@@ -2519,10 +2519,11 @@ def calculate_average_layer(layers):
         for feature_id, avg_data in feature_averages.items():
             if avg_data['count'] == 0:
                 continue
-                
-            # Calculate average probabilities - divide by 32 (total number of combinations)
-            # 4 seasons × 2 week types × 4 times of day = 32 combinations
-            avg_probs = [sum_val / 32.0 for sum_val in avg_data['probability_sums']]
+
+            # Calculate average probabilities - divide by actual count of layers
+            # This ensures streets that appear in fewer layers are averaged correctly
+            # (not all streets appear in all 32 possible combinations)
+            avg_probs = [sum_val / float(avg_data['count']) for sum_val in avg_data['probability_sums']]
             
             # Find the class with highest average probability
             max_prob = max(avg_probs)
@@ -2532,14 +2533,15 @@ def calculate_average_layer(layers):
             properties = avg_data['properties'].copy()
             properties['volume_bin'] = predicted_class
             properties['volume_class'] = predicted_class
-            
+
             # Add average probabilities
             for i in range(1, 6):
                 properties[f'proba_{i}'] = avg_probs[i-1]
             properties['proba_top'] = max_prob
-            
-            # Mark as average layer
+
+            # Mark as average layer and include metadata
             properties['is_average_layer'] = True
+            properties['layer_count'] = avg_data['count']  # How many layers this street appeared in
             
             average_features.append({
                 'type': 'Feature',
