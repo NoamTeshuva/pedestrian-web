@@ -169,6 +169,14 @@ loading_animation_active = False
 last_progress_time = 0
 animation_counter = 0
 
+# Filter pyproj DeprecationWarnings to reduce log spam
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Conversion of an array with ndim > 0 to a scalar is deprecated",
+    category=DeprecationWarning,
+)
+
 app = Flask(__name__)
 
 # CORS: read from env var (comma-separated)
@@ -414,6 +422,48 @@ def _proba_columns(proba, start_label: int = 1):
     except Exception:
         pass
     return cols
+
+def write_gpkg_safe(gdf, path, layer=None):
+    """
+    Write a GeoDataFrame to a GPKG file using pyogrio.
+    Cleans up partial files if GDAL/pyogrio fails.
+
+    Args:
+        gdf: GeoDataFrame to write
+        path: Path to output GPKG file (str or Path)
+        layer: Optional layer name for multi-layer GPKG
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    from pathlib import Path
+
+    path = Path(path)
+    # Ensure parent dir exists
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # If something is already there and is not a directory, remove it
+    if path.exists() and path.is_file():
+        try:
+            path.unlink()
+        except Exception as e:
+            logging.warning(f"Could not remove existing file {path}: {e}")
+
+    try:
+        if layer is not None:
+            gdf.to_file(path, driver="GPKG", layer=layer, engine="pyogrio")
+        else:
+            gdf.to_file(path, driver="GPKG", engine="pyogrio")
+        return True
+    except Exception as exc:
+        logging.exception("Failed to write GPKG to %s: %s", path, exc)
+        # Remove partial/corrupt file if created
+        if path.exists() and path.is_file():
+            try:
+                path.unlink()
+            except Exception:
+                logging.warning("Failed to remove partial GPKG %s", path)
+        return False
 
 def _items_to_geoms(items: list, place: str = None) -> gpd.GeoDataFrame:
     """Convert prediction items to geometries using OSM network."""
@@ -1173,35 +1223,36 @@ def predict_batch_gpkg():
         # Create temporary GPKG file
         import os
         tmp_fd, tmp_path = tempfile.mkstemp(suffix='.gpkg', dir=DATA_DIR)
-        
-        try:
-            # Close the file descriptor to allow geopandas to write
-            os.close(tmp_fd)
-            
-            # Write the GPKG file
-            gdf.to_file(tmp_path, driver='GPKG')
-            
-            # Generate filename
-            place_slug = _slug(place) if place else "batch"
-            filename = f"pedestrian_predictions_batch_{place_slug}.gpkg"
-            
-            logging.info(f"GPKG batch file created with {len(gdf)} predictions")
-            
-            # Send the file
-            return send_file(
-                tmp_path,
-                as_attachment=True,
-                download_name=filename,
-                mimetype='application/geopackage+sqlite3'
-            )
-            
-        except Exception as e:
-            # Clean up on error
+        os.close(tmp_fd)  # Close immediately to avoid permission issues
+
+        # Write the GPKG file using pyogrio
+        if not write_gpkg_safe(gdf, tmp_path):
+            return jsonify({
+                "status": "error",
+                "message": "Failed to write GPKG file on server. Please try again later."
+            }), 500
+
+        # Generate filename
+        place_slug = _slug(place) if place else "batch"
+        filename = f"pedestrian_predictions_batch_{place_slug}.gpkg"
+
+        logging.info(f"GPKG batch file created with {len(gdf)} predictions")
+
+        @after_this_request
+        def _cleanup(resp):
             try:
-                os.unlink(tmp_path)
-            except OSError:
+                os.remove(tmp_path)
+            except Exception:
                 pass
-            raise e
+            return resp
+
+        # Send the file
+        return send_file(
+            tmp_path,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/geopackage+sqlite3'
+        )
             
     except Exception as e:
         logging.error(f"Batch GPKG prediction error: {str(e)}", exc_info=True)
@@ -1383,6 +1434,16 @@ def predict_all():
 
         # שמירה ל-GPKG אחד
         gpkg_path = save_layers_to_gpkg(layers)
+
+        if gpkg_path is None:
+            return jsonify({
+                "status": "error",
+                "message": "Failed to write GPKG file on server. Returning GeoJSON data only.",
+                "layers": json_layers,
+                "place": place,
+                "bbox": bbox,
+                "total_layers": len(json_layers)
+            }), 500
 
         return jsonify({
             "layers": json_layers,
@@ -1578,19 +1639,12 @@ def predict_gpkg():
         fd, tmp_path = tempfile.mkstemp(suffix=".gpkg", dir=DATA_DIR)
         os.close(fd)
 
-        try:
-            # Write single predictions layer
-            preds_gdf.to_file(tmp_path, driver="GPKG", layer="predictions")
-        except Exception:
-            try:
-                from pyogrio import write_dataframe
-                write_dataframe(preds_gdf, tmp_path, driver="GPKG", layer="predictions")
-            except Exception as e:
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-                return jsonify({"error": f"Failed to write GPKG: {str(e)}"}), 500
+        # Write single predictions layer using pyogrio
+        if not write_gpkg_safe(preds_gdf, tmp_path, layer="predictions"):
+            return jsonify({
+                "status": "error",
+                "message": "Failed to write GPKG file on server. Please try again later."
+            }), 500
 
         # Embed QGIS style (predictions only)
         try:
@@ -2514,14 +2568,16 @@ def calculate_average_layer(layers):
 def save_layers_to_gpkg(layers, filename=None):
     """
     Save multiple prediction layers into a single GPKG file.
-    
+
     Args:
         layers: list of dicts with {name, gdf}
         filename: optional custom filename
-    
+
     Returns:
-        str: path to saved GPKG
+        str: path to saved GPKG or None if failed
     """
+    from pathlib import Path
+
     if filename is None:
         filename = "predictions.gpkg"
 
@@ -2529,12 +2585,18 @@ def save_layers_to_gpkg(layers, filename=None):
 
     # מחיקה אם קיים
     if tmp_path.exists():
-        tmp_path.unlink()
+        try:
+            tmp_path.unlink()
+        except Exception as e:
+            logging.warning(f"Could not remove existing GPKG {tmp_path}: {e}")
 
     for i, layer in enumerate(layers):
         gdf = layer["gdf"]
         layer_name = layer["name"]
-        gdf.to_file(tmp_path, layer=layer_name, driver="GPKG")
+        # Use write_gpkg_safe for each layer - pyogrio handles multi-layer correctly
+        if not write_gpkg_safe(gdf, tmp_path, layer=layer_name):
+            logging.error(f"Failed to write layer {layer_name} to {tmp_path}")
+            return None
 
     return str(tmp_path)
 
