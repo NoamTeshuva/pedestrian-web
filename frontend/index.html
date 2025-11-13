@@ -135,17 +135,18 @@
     <!-- Leaflet Draw -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     
-    <!-- API base resolver -->
+    <!-- API base resolver (NOTE: script.js also handles API selection independently) -->
     <script>
         (function () {
             const url = new URL(window.location.href);
             const fromQuery = url.searchParams.get('api');
-            if (fromQuery) localStorage.setItem('API_BASE', fromQuery);
+            if (fromQuery) localStorage.setItem('apiBase', fromQuery);
 
-            const ls = localStorage.getItem('API_BASE');
+            const ls = localStorage.getItem('apiBase');
             const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
-            window.API_BASE = ls || (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-api.onrender.com');
+            // Updated to use new backend URL
+            window.API_BASE = ls || (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-web.onrender.com');
             console.log('[API_BASE]', window.API_BASE);
         })();
     </script>

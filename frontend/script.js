@@ -6,7 +6,14 @@
  */
 class PedestrianPredictionApp {
 	constructor() {
-		this.API_BASE_URL = window.API_BASE || "http://127.0.0.1:8000";
+		// --- API base selection (priority: ?api=... → localStorage → default) ---
+		const urlApi = new URLSearchParams(location.search).get('api');
+		const storedApi = localStorage.getItem('apiBase');
+		const DEFAULT_API = 'https://pedestrian-web.onrender.com';  // NEW default
+
+		this.API_BASE_URL = urlApi || storedApi || DEFAULT_API;
+		if (urlApi) localStorage.setItem('apiBase', urlApi);
+
 		console.log("[PedestrianPredictionApp] Using API:", this.API_BASE_URL);
 
 		// Application state
@@ -403,10 +410,19 @@ class PedestrianPredictionApp {
 	 * Start monitoring progress updates from server
 	 */
 	startProgressMonitoring() {
+		// Disable progress polling to avoid endless CORS/5xx spam for now
+		const PROGRESS_SUPPORTED = false;
+
+		if (!PROGRESS_SUPPORTED) {
+			console.log('[PedestrianPredictionApp] progress polling disabled');
+			return;
+		}
+
+		// Original polling code kept for future use when backend implements /progress:
 		if (this.progressInterval) {
 			clearInterval(this.progressInterval);
 		}
-		
+
 		this.progressInterval = setInterval(async () => {
 			try {
 				const response = await fetch(`${this.API_BASE_URL}/progress`);
