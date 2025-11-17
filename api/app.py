@@ -11,6 +11,9 @@ if os.getcwd() not in sys.path:
     sys.path.insert(0, os.getcwd())
 # ---------------------------------------------------------------------------
 
+# This must be imported early to ensure warning filters are active before heavy imports
+import warnings_config  # noqa: F401
+
 # Load environment variables from .env file (for local development)
 try:
     from dotenv import load_dotenv
