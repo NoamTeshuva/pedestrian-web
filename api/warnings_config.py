@@ -7,7 +7,6 @@ to keep Render logs clean while still allowing real problems to surface.
 """
 
 import warnings
-import sys
 
 # Apply filters immediately upon import, before any other code runs
 def _setup_warning_filters():
@@ -37,12 +36,3 @@ def _setup_warning_filters():
 
 # Execute immediately on module import
 _setup_warning_filters()
-
-# Also set PYTHONWARNINGS environment variable as a fallback for subprocesses
-if 'PYTHONWARNINGS' not in sys.argv:
-    # This helps catch warnings in worker processes
-    import os
-    os.environ.setdefault('PYTHONWARNINGS',
-        'ignore::DeprecationWarning:pyproj,'
-        'ignore::FutureWarning:osmnx'
-    )

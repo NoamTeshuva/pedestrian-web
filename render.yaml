@@ -19,6 +19,8 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: PYTHONWARNINGS
+        value: "ignore::DeprecationWarning:pyproj,ignore::FutureWarning:osmnx,ignore::UserWarning:rasterio"
       - key: DATA_DIR
         value: /tmp
       - key: CORS_ORIGINS
