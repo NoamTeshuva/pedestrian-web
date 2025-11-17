@@ -13,13 +13,13 @@ import warnings
 warnings.filterwarnings(
     "ignore",
     category=DeprecationWarning,
-    message="Conversion of an array with ndim > 0 to a scalar is deprecated",
-    module="pyproj.transformer",
+    message=r"Conversion of an array with ndim > 0 to a scalar is deprecated.*",
+    module=r"pyproj\.transformer",
 )
 
 # 2) OSMnx FutureWarning about settings.timeout:
 warnings.filterwarnings(
     "ignore",
     category=FutureWarning,
-    message="`settings.timeout` is deprecated and will be removed in the v2.0.0 release",
+    message=r"`settings\.timeout` is deprecated and will be removed in the v2\.0\.0 release.*",
 )
