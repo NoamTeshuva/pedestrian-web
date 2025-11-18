@@ -672,6 +672,64 @@ except Exception as e:
     logging.error(f"Failed to load model from {MODEL_PATH}: {e}")
     model = None
 
+# Initialize Israel weather profile store (if available)
+# Configuration
+USE_ISRAEL_PRECOMPUTED_WEATHER = os.getenv("USE_ISRAEL_PRECOMPUTED_WEATHER", "true").lower() == "true"
+# Support both consolidated GPKG and legacy separate files
+ISRAEL_WEATHER_DATA_PATH = os.getenv("ISRAEL_WEATHER_DATA_PATH",
+                                     "data/processed/israel/israel_weather_zones.gpkg")  # Consolidated GPKG
+# Legacy paths (for backward compatibility)
+ISRAEL_WEATHER_PROFILES_PATH = os.getenv("ISRAEL_WEATHER_PROFILES_PATH",
+                                          "data/processed/israel/israel_weather_profiles.parquet")
+ISRAEL_WEATHER_ZONES_PATH = os.getenv("ISRAEL_WEATHER_ZONES_PATH",
+                                      "data/processed/israel/israel_weather_zones.gpkg")
+
+if USE_ISRAEL_PRECOMPUTED_WEATHER:
+    try:
+        from feature_engineering.weather_profile_store import initialize_israel_weather_store
+        from feature_engineering.weather_features import get_seasonal_weather_profile
+
+        logging.info("Attempting to initialize Israel weather profile store...")
+
+        # Try consolidated GPKG first, then fall back to legacy format
+        data_path = None
+        zones_path = None
+
+        if os.path.exists(ISRAEL_WEATHER_DATA_PATH):
+            # Use consolidated GPKG (profiles + zones in one file)
+            data_path = ISRAEL_WEATHER_DATA_PATH
+            logging.info(f"Using consolidated GPKG: {data_path}")
+        elif os.path.exists(ISRAEL_WEATHER_PROFILES_PATH):
+            # Use legacy format (separate parquet + gpkg)
+            data_path = ISRAEL_WEATHER_PROFILES_PATH
+            zones_path = ISRAEL_WEATHER_ZONES_PATH
+            logging.info(f"Using legacy format: {data_path} + {zones_path}")
+
+        if data_path:
+            weather_store = initialize_israel_weather_store(
+                profiles_path=data_path,
+                zones_path=zones_path,
+                fallback_function=get_seasonal_weather_profile
+            )
+            if weather_store:
+                logging.info("✓ Israel weather profile store initialized successfully")
+                logging.info(f"  - Zones: {weather_store.get_zones_count()}")
+                logging.info(f"  - Profiles: {weather_store.get_profiles_count()}")
+            else:
+                logging.warning("Israel weather profile store initialization returned None")
+                logging.info("Will use live weather API for all locations")
+        else:
+            logging.warning(f"Israel weather data not found")
+            logging.info("Run scripts/precompute_israel_weather_profiles.py to generate profiles")
+            logging.info("Will use live weather API for all locations")
+
+    except Exception as e:
+        logging.error(f"Failed to initialize Israel weather profile store: {e}")
+        logging.info("Will use live weather API for all locations")
+else:
+    logging.info("Israel precomputed weather disabled (USE_ISRAEL_PRECOMPUTED_WEATHER=false)")
+    logging.info("Will use live weather API for all locations")
+
 # Use configuration from pipeline
 FEATS = PipelineConfig.FEATURE_COLUMNS
 CAT_COLS = PipelineConfig.CATEGORICAL_COLUMNS

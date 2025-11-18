@@ -4,6 +4,8 @@ weather_features.py
 
 Provides weather features for pedestrian volume prediction using Open-Meteo API.
 Implements smart weather fetching:
+- Israel locations → Use precomputed weather profiles (fast)
+- Other locations → Use live Open-Meteo API (slower)
 - Same season → Use last week's weather (most recent)
 - Different season → Use last occurrence of that season
 
@@ -15,6 +17,15 @@ from typing import Optional, Dict, Any, Tuple
 import pandas as pd
 import geopandas as gpd
 import requests
+
+# Import Israel weather support
+try:
+    from .israel_weather_zones import is_in_israel
+    from .weather_profile_store import get_israel_weather_store
+    ISRAEL_WEATHER_AVAILABLE = True
+except ImportError:
+    ISRAEL_WEATHER_AVAILABLE = False
+    logging.warning("Israel weather zones not available, will use live API for all locations")
 
 
 class WeatherError(Exception):
@@ -291,6 +302,79 @@ def fetch_weather_from_open_meteo(lat: float, lon: float,
         raise WeatherError(f"Weather API failed: {e}")
 
 
+def get_seasonal_weather_profile(latitude: float,
+                                longitude: float,
+                                season: str,
+                                time_of_day: str,
+                                n_samples: int = 5) -> Dict[str, float]:
+    """
+    Get seasonal weather profile for a location using historical data averaging.
+
+    This is the core reusable function for fetching weather, used both:
+    - In offline precomputation (for weather zones)
+    - In online prediction (for non-Israel locations)
+
+    Parameters
+    ----------
+    latitude : float
+        Latitude in decimal degrees
+    longitude : float
+        Longitude in decimal degrees
+    season : str
+        Season name: 'winter', 'spring', 'summer', 'autumn'
+    time_of_day : str
+        Time of day: 'morning', 'afternoon', 'evening', 'night'
+    n_samples : int
+        Number of dates to sample and average (default 5)
+
+    Returns
+    -------
+    dict
+        Weather profile with keys:
+        - temperature: float (°C)
+        - precipitation: float (mm)
+        - wind_speed: float (km/h)
+
+    Raises
+    ------
+    WeatherError
+        If weather fetch fails
+    """
+    # Map season to a representative month for the season
+    season_month_map = {
+        'winter': 1,   # January
+        'spring': 4,   # April
+        'summer': 7,   # July
+        'autumn': 10   # October
+    }
+
+    # Create a representative timestamp for this season
+    month = season_month_map.get(season.lower(), 1)
+    timestamp = datetime(datetime.now().year, month, 15, 12, 0, 0)
+
+    # Get sample dates from the season
+    fetch_dates = get_seasonal_sample_dates(timestamp, n_samples=n_samples)
+    target_season = get_season(timestamp)
+
+    # Get hours for time_of_day
+    target_hours = get_time_of_day_hours(time_of_day)
+
+    logging.info(f"Fetching {target_season} weather averaged from {len(fetch_dates)} dates, "
+                f"time of day: {time_of_day} (hours: {target_hours})")
+
+    # Fetch weather from Open-Meteo
+    try:
+        weather_data = fetch_weather_from_open_meteo(
+            latitude, longitude, fetch_dates, target_hours
+        )
+        logging.info(f"Extracted {target_season}/{time_of_day} weather: {weather_data}")
+        return weather_data
+    except WeatherError:
+        # Fallback to seasonal defaults
+        logging.warning(f"Using seasonal defaults for {target_season}")
+        return get_seasonal_defaults(timestamp)
+
+
 def get_seasonal_defaults(timestamp: datetime) -> Dict[str, float]:
     """
     Get seasonal default weather values based on the month.
@@ -338,11 +422,14 @@ def get_seasonal_defaults(timestamp: datetime) -> Dict[str, float]:
 
 def compute_weather_features(gdf: gpd.GeoDataFrame,
                             timestamp: Optional[datetime] = None,
-                            time_of_day: Optional[str] = None) -> gpd.GeoDataFrame:
+                            time_of_day: Optional[str] = None,
+                            use_precomputed_israel: bool = True) -> gpd.GeoDataFrame:
     """
     Add weather features to street edges using seasonal averaging.
 
     Weather Strategy:
+    - FOR ISRAEL: Uses precomputed weather profiles (fast, no API calls)
+    - FOR OTHER LOCATIONS: Fetches weather from Open-Meteo API
     - Fetches weather from multiple representative dates within the target season
     - Averages across 5 different days spanning the entire season (early, mid, late)
     - Averages weather across representative hours for the specified time_of_day
@@ -360,6 +447,8 @@ def compute_weather_features(gdf: gpd.GeoDataFrame,
     time_of_day : str, optional
         Time of day: 'morning', 'afternoon', 'evening', 'night'
         If provided, weather is averaged across representative hours.
+    use_precomputed_israel : bool, optional
+        If True, use precomputed profiles for Israel locations (default: True)
 
     Returns
     -------
@@ -386,18 +475,59 @@ def compute_weather_features(gdf: gpd.GeoDataFrame,
         # Get location center
         lat, lon = get_location_center(gdf)
 
+        # Determine season and time_of_day
+        target_season = get_season(timestamp)
+        if not time_of_day:
+            time_of_day = 'afternoon'  # Default
+
+        # Check if location is in Israel and precomputed profiles are available
+        use_israel_profiles = (
+            use_precomputed_israel and
+            ISRAEL_WEATHER_AVAILABLE and
+            is_in_israel(lat, lon)
+        )
+
+        if use_israel_profiles:
+            # Try to use precomputed Israel weather profiles
+            try:
+                store = get_israel_weather_store()
+                if store and store.is_loaded():
+                    logging.info(f"Using precomputed Israel weather for {target_season}/{time_of_day}")
+
+                    # Get total bounds geometry for zone lookup
+                    total_geom = gdf.unary_union
+
+                    weather_data = store.get_weather_for_geometry(
+                        geom=total_geom,
+                        season=target_season,
+                        time_of_day=time_of_day
+                    )
+
+                    logging.info(f"Retrieved precomputed weather: "
+                               f"temp={weather_data['temperature']:.1f}°C, "
+                               f"precip={weather_data['precipitation']:.1f}mm, "
+                               f"wind={weather_data['wind_speed']:.1f}km/h")
+
+                    # Add weather features to all edges
+                    gdf["temperature"] = weather_data["temperature"]
+                    gdf["precipitation"] = weather_data["precipitation"]
+                    gdf["wind_speed"] = weather_data["wind_speed"]
+
+                    return gdf
+
+            except Exception as e:
+                logging.warning(f"Failed to use precomputed Israel weather: {e}")
+                logging.info("Falling back to live weather API")
+                # Continue to live API fetch below
+
+        # Live weather fetch (for non-Israel or if precomputed failed)
         # Get multiple sample dates from the target season for averaging
         fetch_dates = get_seasonal_sample_dates(timestamp, n_samples=5)
-        target_season = get_season(timestamp)
 
         # Get hours to average based on time_of_day
-        if time_of_day:
-            target_hours = get_time_of_day_hours(time_of_day)
-            logging.info(f"Fetching {target_season} weather averaged from {len(fetch_dates)} dates, "
-                        f"time of day: {time_of_day} (hours: {target_hours})")
-        else:
-            target_hours = [timestamp.hour]
-            logging.info(f"Fetching {target_season} weather averaged from {len(fetch_dates)} dates")
+        target_hours = get_time_of_day_hours(time_of_day)
+        logging.info(f"Fetching {target_season} weather averaged from {len(fetch_dates)} dates, "
+                    f"time of day: {time_of_day} (hours: {target_hours})")
 
         # Fetch weather from Open-Meteo (multi-date averaging)
         try:
