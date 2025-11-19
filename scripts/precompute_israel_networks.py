@@ -70,12 +70,9 @@ def download_network_for_zone(zone_geometry, zone_id: str, network_type: str = '
         logging.info(f"    Bbox: ({west:.4f}, {south:.4f}, {east:.4f}, {north:.4f})")
 
         # Download street network
-        # Use bbox parameter for more reliable downloads
+        # OSMnx expects bbox as (north, south, east, west) tuple
         G = ox.graph_from_bbox(
-            north=north,
-            south=south,
-            east=east,
-            west=west,
+            bbox=(north, south, east, west),
             network_type=network_type,
             simplify=True,
             retain_all=False
