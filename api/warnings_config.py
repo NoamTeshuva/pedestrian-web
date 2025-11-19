@@ -7,6 +7,8 @@ to keep Render logs clean while still allowing real problems to surface.
 """
 
 import warnings
+import os
+import logging
 
 # Apply filters immediately upon import, before any other code runs
 def _setup_warning_filters():
@@ -52,6 +54,22 @@ def _setup_warning_filters():
         "ignore",
         message=r".*CPLE_AppDefined.*",
     )
+
+    # 6) Suppress GDAL errors at the C library level
+    # These 403 errors are expected (checking for auxiliary files that don't exist)
+    try:
+        from osgeo import gdal
+        # CPLQuietErrorHandler suppresses all GDAL errors to stderr
+        # CE_Warning and above will still be logged internally but not printed
+        gdal.PushErrorHandler('CPLQuietErrorHandler')
+        gdal.SetConfigOption('CPL_LOG', '/dev/null')  # Suppress all CPL logs
+        os.environ['CPL_CURL_VERBOSE'] = 'NO'  # Disable verbose CURL output
+    except ImportError:
+        pass  # GDAL not installed or not needed
+
+    # 7) Set environment variable to suppress Python warnings at OS level
+    # This catches warnings that fire before this module is imported
+    os.environ['PYTHONWARNINGS'] = 'ignore::DeprecationWarning'
 
 # Execute immediately on module import
 _setup_warning_filters()
