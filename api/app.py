@@ -11,8 +11,14 @@ if os.getcwd() not in sys.path:
     sys.path.insert(0, os.getcwd())
 # ---------------------------------------------------------------------------
 
-# This must be imported early to ensure warning filters are active before heavy imports
-import warnings_config  # noqa: F401
+# Kill all DeprecationWarnings globally (including pyproj spam)
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings(
+    "ignore",
+    message=".*Conversion of an array with ndim > 0 to a scalar is deprecated.*",
+    category=DeprecationWarning,
+)
 
 # Load environment variables from .env file (for local development)
 try:
@@ -153,8 +159,16 @@ except ImportError as e:
 # Configure logging - show normal info but disable Flask request spam
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
+# Filter out the GDAL CPLE_AppDefined HTTP 403 spam
+class GdalHttp403Filter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return "CPLE_AppDefined in HTTP response code" not in msg
+
+root_logger = logging.getLogger()
+root_logger.addFilter(GdalHttp403Filter())
+
 # Disable Flask request logging to keep terminal clean
-import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
