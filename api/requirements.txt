@@ -16,7 +16,7 @@ rasterio==1.3.9
 
 # Data Processing
 pandas==2.2.0
-numpy==1.26.3
+numpy==1.24.4
 
 # Cloud Storage
 boto3==1.34.34
