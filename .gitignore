@@ -87,6 +87,9 @@ cache/
 # Logs
 *.log
 logs/
+flask_*.log
+network_*.log
+precompute_*.log
 
 # Large files that should use Git LFS (tracked via LFS, not ignored)
 # *.cbm - tracked via Git LFS in .gitattributes
@@ -101,3 +104,50 @@ api/models/*.pkl
 # Test files
 test_*.py
 *_test.py
+
+# ============================================
+# DATA FILES (Stored in Vultr, not in Git)
+# ============================================
+
+# All precomputed data (networks, weather, zones)
+data/
+data/processed/
+data/processed/israel/
+data/raw/
+data/cache/
+
+# Precomputed networks (large GPKG files - goes to Vultr)
+*_network.gpkg
+israel_weather_zones*.gpkg
+israel_weather_profiles.parquet
+israel_weather_profiles.csv
+
+# Development/testing data
+test_data/
+sample_data/
+
+# ============================================
+# LOCAL DEVELOPMENT ARTIFACTS
+# ============================================
+
+# OSMnx cache (auto-generated, not needed in repo)
+cache/
+.cache/
+osmnx_cache/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Local experiments and analysis
+experiments/
+analysis/
+notebooks/output/
+
+# Background process tracking
+nul
+*.pid
+
+# Temporary computation outputs
+temp_*.csv
+temp_*.gpkg
+temp_*.parquet
