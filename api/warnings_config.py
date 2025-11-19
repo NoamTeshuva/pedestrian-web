@@ -23,7 +23,20 @@ def _setup_warning_filters():
     #    (The main offender is OSMnx settings.timeout)
     warnings.simplefilter("ignore", FutureWarning)
 
-    # 3) Also set specific message-based filters as backup
+    # 3) Target pyproj module specifically (most aggressive for this lib)
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        module="pyproj"
+    )
+
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        module="pyproj.transformer"
+    )
+
+    # 4) Also set specific message-based filters as backup
     warnings.filterwarnings(
         "ignore",
         message=r".*Conversion of an array with ndim > 0 to a scalar is deprecated.*",
@@ -34,7 +47,7 @@ def _setup_warning_filters():
         message=r".*settings\.timeout.*is deprecated.*",
     )
 
-    # 4) GDAL/CPLE warnings (these are logged via C library, harder to suppress)
+    # 5) GDAL/CPLE warnings (these are logged via C library, harder to suppress)
     warnings.filterwarnings(
         "ignore",
         message=r".*CPLE_AppDefined.*",
