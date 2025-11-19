@@ -5,7 +5,7 @@ precompute_israel_weather_profiles.py
 Offline script to precompute weather profiles for all Israel weather zones.
 
 This script:
-1. Loads or generates ~50 weather zones covering Israel
+1. Loads or generates weather zones covering Israel
 2. For each zone and each (season, time_of_day) combination:
    - Calls the existing weather API logic
    - Samples 5 dates and averages across the season
@@ -16,11 +16,19 @@ This script:
 Run this script periodically (e.g., monthly) to refresh weather data.
 
 Usage:
-    python scripts/precompute_israel_weather_profiles.py [--force] [--zones-file path]
+    # Standard grid (50 zones - 10x5)
+    python scripts/precompute_israel_weather_profiles.py --force
+
+    # High precision (200 zones - 20x10)
+    python scripts/precompute_israel_weather_profiles.py --force --grid 20x10
+
+    # Maximum precision (800 zones - 40x40)
+    python scripts/precompute_israel_weather_profiles.py --force --grid 40x40
 
 Options:
     --force          Overwrite existing profiles
-    --zones-file     Path to weather zones .gpkg file (default: auto-detect)
+    --grid           Grid size as "COLSxROWS" (default: 10x5 for 50 zones)
+    --zones-file     Path to weather zones .gpkg file (overrides --grid)
     --output-dir     Output directory (default: data/processed/israel)
 """
 import sys
@@ -143,8 +151,10 @@ def main():
     )
     parser.add_argument('--force', action='store_true',
                        help="Overwrite existing profiles")
+    parser.add_argument('--grid', type=str, default='10x5',
+                       help='Grid size as "COLSxROWS" (e.g., "20x10" for 200 zones)')
     parser.add_argument('--zones-file', type=str,
-                       help="Path to weather zones .gpkg file")
+                       help="Path to weather zones .gpkg file (overrides --grid)")
     parser.add_argument('--output-dir', type=str,
                        default='data/processed/israel',
                        help="Output directory")
@@ -173,10 +183,18 @@ def main():
         logging.error("Use --force to overwrite")
         return 1
 
+    # Parse grid size
+    try:
+        cols, rows = map(int, args.grid.split('x'))
+    except ValueError:
+        logging.error("Invalid grid format. Use 'COLSxROWS' (e.g., '20x10')")
+        return 1
+
     # Load or generate weather zones
     logging.info("\n" + "="*60)
     logging.info("Step 1: Loading Weather Zones")
     logging.info("="*60)
+    logging.info(f"Grid size: {cols}×{rows} = {cols*rows} zones")
 
     try:
         if args.zones_file:
@@ -184,8 +202,8 @@ def main():
         elif zones_path.exists():
             zones_gdf = load_israel_weather_zones(str(zones_path))
         else:
-            logging.info("Generating new weather zones...")
-            zones_gdf = generate_israel_weather_zones(n_cols=10, n_rows=5)
+            logging.info(f"Generating {cols}×{rows} weather zones...")
+            zones_gdf = generate_israel_weather_zones(n_cols=cols, n_rows=rows)
             save_israel_weather_zones(zones_gdf, str(zones_path))
 
         logging.info(f"Loaded {len(zones_gdf)} weather zones")
