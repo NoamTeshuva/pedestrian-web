@@ -55,6 +55,15 @@ from .weather_features import (
     WeatherError
 )
 
+# Import city name resolver for per-city optimization
+try:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from city_name_resolver import CityNameResolver
+    city_resolver = CityNameResolver()
+except ImportError:
+    city_resolver = None
+    logging.warning("CityNameResolver not available - city-specific optimizations disabled")
+
 # Configuration
 class PipelineConfig:
     """Configuration constants for the feature extraction pipeline."""
@@ -197,31 +206,42 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
                         bbox: Optional[Tuple[float, float, float, float]] = None,
                         timestamp: Optional[Union[str, datetime]] = None) -> gpd.GeoDataFrame:
     """Extract all features for the edges using the modular feature functions.
-    
+
     Args:
         edges_gdf: Street edges GeoDataFrame
         graph: NetworkX graph for centrality computation
         place: Place name for land use data
         bbox: Bounding box for land use data
         timestamp: Timestamp for temporal features
-        
+
     Returns:
         GeoDataFrame: Edges with all features extracted
-        
+
     Raises:
         PipelineError: If feature extraction fails
     """
     try:
         result_gdf = edges_gdf.copy()
         extraction_times = {}
-        
+
+        # Try to resolve place to city name for per-city optimizations
+        city = None
+        if place and city_resolver:
+            try:
+                city = city_resolver.resolve(place)
+                if city:
+                    logging.info(f"Resolved '{place}' to city '{city}' for per-city optimizations")
+            except Exception as e:
+                logging.warning(f"Failed to resolve city name from '{place}': {e}")
+
         # 1. Extract land use features
         start_time = time.time()
         try:
             result_gdf = compute_landuse_edges(
-                result_gdf, 
-                place=place, 
-                bbox=bbox
+                result_gdf,
+                place=place,
+                bbox=bbox,
+                city=city
             )
             extraction_times['landuse'] = time.time() - start_time
             log_with_clear(f"Land use extraction completed in {extraction_times['landuse']:.2f}s")
@@ -270,7 +290,7 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
         # 5. Extract environmental features
         start_time = time.time()
         try:
-            result_gdf = compute_environmental_features(result_gdf)
+            result_gdf = compute_environmental_features(result_gdf, city=city)
             extraction_times['environmental'] = time.time() - start_time
             log_with_clear(f"Environmental extraction completed in {extraction_times['environmental']:.2f}s")
         except EnvironmentalError as e:
