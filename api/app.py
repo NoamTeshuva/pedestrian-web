@@ -1626,8 +1626,9 @@ def predict_gpkg():
             return jsonify({"error": "Model not available", "code": 503,
                             "details": "CatBoost model failed to load at startup"}), 503
 
-        # Feature pipeline (תומך בשני המצבים: place או bbox)
-        features_gdf, pipeline_metadata = run_feature_pipeline(
+        # Feature pipeline (using cached version to avoid duplicate work)
+        from feature_engineering.feature_pipeline import run_feature_pipeline_cached_normalized
+        features_gdf, pipeline_metadata = run_feature_pipeline_cached_normalized(
             place=place,
             bbox=bbox,
             timestamp=target_datetime.isoformat()
@@ -2724,9 +2725,10 @@ def predict_multi():
         start_loading_animation()
         update_progress("starting", 0, total_steps, f"מתחיל חיזוי עבור {place or 'bbox'}")
         
-        # run pipeline ONCE
+        # run pipeline ONCE (using cached version to avoid duplicate work)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
-        features_gdf, pipeline_metadata = run_feature_pipeline(
+        from feature_engineering.feature_pipeline import run_feature_pipeline_cached_normalized
+        features_gdf, pipeline_metadata = run_feature_pipeline_cached_normalized(
             place=place,
             bbox=bbox,
             timestamp=rep_ts.isoformat(),

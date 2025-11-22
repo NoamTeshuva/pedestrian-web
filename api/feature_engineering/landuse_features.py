@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Optional, Set, Tuple, Dict, Any, Union
 import pandas as pd
 import geopandas as gpd
-import fiona
 import logging
 import osmnx as ox
 from shapely.geometry import Point

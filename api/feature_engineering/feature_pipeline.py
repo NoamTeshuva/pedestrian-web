@@ -9,6 +9,7 @@ Follows CLAUDE.md guidelines for production-ready, modular, and type-safe code.
 import logging
 import time
 from datetime import datetime
+from functools import lru_cache
 from typing import Optional, Dict, Any, Tuple, Union, List
 import pandas as pd
 import geopandas as gpd
@@ -479,25 +480,25 @@ def run_feature_pipeline(place: Optional[str] = None,
 
 def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     """Prepare features for model prediction by selecting and ordering columns.
-    
+
     Args:
         features_gdf: GeoDataFrame with extracted features
-        
+
     Returns:
         DataFrame: Features ready for model input with correct column order
-        
+
     Raises:
         PipelineError: If required features are missing
     """
     try:
         # Select only the required feature columns in correct order
         model_features = features_gdf[PipelineConfig.FEATURE_COLUMNS].copy()
-        
+
         # Validate no missing values in critical features
         critical_nulls = model_features.isnull().sum()
         if critical_nulls.any():
             logging.warning(f"Found null values in features: {critical_nulls[critical_nulls > 0].to_dict()}")
-        
+
         # Fill any remaining nulls with defaults
         defaults = {
             # Temporal features
@@ -520,21 +521,108 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
             'precipitation': 0.0,
             'wind_speed': 10.0
         }
-        
+
         for col, default_val in defaults.items():
             if col in model_features.columns:
                 model_features[col] = model_features[col].fillna(default_val)
-        
+
         log_with_clear(f"Prepared {len(model_features)} feature vectors for model input")
-        
+
         return model_features
-        
+
     except Exception as e:
         raise PipelineError(
             f"Failed to prepare model features: {str(e)}",
             code=500,
             details={"available_columns": list(features_gdf.columns)}
         )
+
+
+# =========================
+# Cached Pipeline Wrapper
+# =========================
+
+@lru_cache(maxsize=64)
+def run_feature_pipeline_cached(
+    place: Optional[str],
+    bbox_key: Optional[Tuple[float, float, float, float]],
+    timestamp_str: Optional[str]
+) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
+    """
+    Cached wrapper for run_feature_pipeline.
+
+    This wrapper enables caching of expensive feature extraction to avoid
+    recomputing the same features when multiple endpoints (e.g., /predict-multi
+    and /predict-gpkg) request features for the same place/bbox.
+
+    Args:
+        place: Place name (e.g., "Monaco", "Tel Aviv")
+        bbox_key: Bounding box as hashable tuple (west, south, east, north) or None
+        timestamp_str: ISO timestamp string or None
+
+    Returns:
+        tuple: (features_gdf, pipeline_metadata) same as run_feature_pipeline
+
+    Note:
+        All arguments must be hashable for LRU cache to work. GeoDataFrames and
+        datetime objects are converted to/from hashable types by the normalized wrapper.
+    """
+    # Convert timestamp string back to datetime if provided
+    timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
+
+    # Call the original pipeline
+    return run_feature_pipeline(
+        place=place,
+        bbox=bbox_key,
+        timestamp=timestamp
+    )
+
+
+def run_feature_pipeline_cached_normalized(
+    place: Optional[str] = None,
+    bbox: Optional[Tuple[float, float, float, float]] = None,
+    timestamp: Optional[Union[str, datetime]] = None
+) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
+    """
+    Normalized wrapper for cached pipeline that handles type conversion.
+
+    This function normalizes input types to hashable forms before calling the
+    cached wrapper, making it easy to use from API endpoints.
+
+    Args:
+        place: Place name (e.g., "Monaco", "Tel Aviv")
+        bbox: Bounding box as tuple/list (west, south, east, north) or None
+        timestamp: ISO timestamp string or datetime object or None
+
+    Returns:
+        tuple: (features_gdf, pipeline_metadata) from cached pipeline
+
+    Example:
+        # Both endpoints can use the same cached result:
+        features_gdf, metadata = run_feature_pipeline_cached_normalized(
+            place="Tel Aviv",
+            bbox=None,
+            timestamp=None
+        )
+    """
+    # Normalize bbox to hashable tuple
+    bbox_key = tuple(bbox) if bbox is not None else None
+
+    # Normalize timestamp to ISO string
+    if timestamp is None:
+        timestamp_str = None
+    elif isinstance(timestamp, datetime):
+        timestamp_str = timestamp.isoformat()
+    else:
+        # Already a string
+        timestamp_str = str(timestamp)
+
+    # Call cached wrapper with hashable arguments
+    return run_feature_pipeline_cached(
+        place=place,
+        bbox_key=bbox_key,
+        timestamp_str=timestamp_str
+    )
 
 def example_usage():
     """Example of how to use the feature pipeline."""
