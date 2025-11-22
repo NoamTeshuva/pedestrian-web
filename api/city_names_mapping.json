@@ -1,0 +1,332 @@
+{
+  "tel_aviv": {
+    "hebrew": "תל אביב",
+    "english": ["Tel Aviv", "Tel Aviv-Yafo", "Tel Aviv-Jaffa"],
+    "description": "Tel Aviv"
+  },
+  "haifa": {
+    "hebrew": "חיפה",
+    "english": ["Haifa"],
+    "description": "Haifa"
+  },
+  "jerusalem": {
+    "hebrew": "ירושלים",
+    "english": ["Jerusalem", "Yerushalayim"],
+    "description": "Jerusalem"
+  },
+  "beer_sheva": {
+    "hebrew": "באר שבע",
+    "english": ["Beer Sheva", "Be'er Sheva", "Beersheba"],
+    "description": "Beer Sheva"
+  },
+  "netanya": {
+    "hebrew": "נתניה",
+    "english": ["Netanya"],
+    "description": "Netanya"
+  },
+  "ashdod": {
+    "hebrew": "אשדוד",
+    "english": ["Ashdod"],
+    "description": "Ashdod"
+  },
+  "rishon_lezion": {
+    "hebrew": "ראשון לציון",
+    "english": ["Rishon LeZion", "Rishon Lezion"],
+    "description": "Rishon LeZion"
+  },
+  "petah_tikva": {
+    "hebrew": "פתח תקווה",
+    "english": ["Petah Tikva", "Petach Tikva", "Petah Tikvah"],
+    "description": "Petah Tikva"
+  },
+  "holon": {
+    "hebrew": "חולון",
+    "english": ["Holon"],
+    "description": "Holon"
+  },
+  "bnei_brak": {
+    "hebrew": "בני ברק",
+    "english": ["Bnei Brak", "Bene Beraq"],
+    "description": "Bnei Brak"
+  },
+  "ramat_gan": {
+    "hebrew": "רמת גן",
+    "english": ["Ramat Gan"],
+    "description": "Ramat Gan"
+  },
+  "ashkelon": {
+    "hebrew": "אשקלון",
+    "english": ["Ashkelon", "Ashqelon"],
+    "description": "Ashkelon"
+  },
+  "rehovot": {
+    "hebrew": "רחובות",
+    "english": ["Rehovot"],
+    "description": "Rehovot"
+  },
+  "bat_yam": {
+    "hebrew": "בת ים",
+    "english": ["Bat Yam"],
+    "description": "Bat Yam"
+  },
+  "kfar_saba": {
+    "hebrew": "כפר סבא",
+    "english": ["Kfar Saba", "Kefar Sava"],
+    "description": "Kfar Saba"
+  },
+  "herzliya": {
+    "hebrew": "הרצליה",
+    "english": ["Herzliya", "Herzliyya"],
+    "description": "Herzliya"
+  },
+  "hadera": {
+    "hebrew": "חדרה",
+    "english": ["Hadera"],
+    "description": "Hadera"
+  },
+  "modiin": {
+    "hebrew": "מודיעין",
+    "english": ["Modiin", "Modi'in"],
+    "description": "Modiin"
+  },
+  "nazareth": {
+    "hebrew": "נצרת",
+    "english": ["Nazareth"],
+    "description": "Nazareth"
+  },
+  "lod": {
+    "hebrew": "לוד",
+    "english": ["Lod"],
+    "description": "Lod"
+  },
+  "ramla": {
+    "hebrew": "רמלה",
+    "english": ["Ramla", "Ramle"],
+    "description": "Ramla"
+  },
+  "raanana": {
+    "hebrew": "רעננה",
+    "english": ["Ra'anana", "Raanana"],
+    "description": "Raanana"
+  },
+  "rahat": {
+    "hebrew": "רהט",
+    "english": ["Rahat"],
+    "description": "Rahat"
+  },
+  "givatayim": {
+    "hebrew": "גבעתיים",
+    "english": ["Givatayim"],
+    "description": "Givatayim"
+  },
+  "nahariya": {
+    "hebrew": "נהריה",
+    "english": ["Nahariya"],
+    "description": "Nahariya"
+  },
+  "beitar_illit": {
+    "hebrew": "ביתר עילית",
+    "english": ["Beitar Illit"],
+    "description": "Beitar Illit"
+  },
+  "acre": {
+    "hebrew": "עכו",
+    "english": ["Acre", "Akko"],
+    "description": "Acre"
+  },
+  "umm_al_fahm": {
+    "hebrew": "אום אל-פחם",
+    "english": ["Umm al-Fahm"],
+    "description": "Umm al-Fahm"
+  },
+  "eilat": {
+    "hebrew": "אילת",
+    "english": ["Eilat"],
+    "description": "Eilat"
+  },
+  "rosh_haayin": {
+    "hebrew": "ראש העין",
+    "english": ["Rosh HaAyin", "Rosh Ha'ayin"],
+    "description": "Rosh HaAyin"
+  },
+  "afula": {
+    "hebrew": "עפולה",
+    "english": ["Afula"],
+    "description": "Afula"
+  },
+  "nes_ziona": {
+    "hebrew": "נס ציונה",
+    "english": ["Nes Ziona", "Ness Ziona"],
+    "description": "Nes Ziona"
+  },
+  "akko": {
+    "hebrew": "עכו",
+    "english": ["Akko", "Acre"],
+    "description": "Akko"
+  },
+  "yavne": {
+    "hebrew": "יבנה",
+    "english": ["Yavne"],
+    "description": "Yavne"
+  },
+  "kiryat_ata": {
+    "hebrew": "קריית אתא",
+    "english": ["Kiryat Ata"],
+    "description": "Kiryat Ata"
+  },
+  "kiryat_gat": {
+    "hebrew": "קריית גת",
+    "english": ["Kiryat Gat"],
+    "description": "Kiryat Gat"
+  },
+  "kiryat_motzkin": {
+    "hebrew": "קריית מוצקין",
+    "english": ["Kiryat Motzkin"],
+    "description": "Kiryat Motzkin"
+  },
+  "kiryat_yam": {
+    "hebrew": "קריית ים",
+    "english": ["Kiryat Yam"],
+    "description": "Kiryat Yam"
+  },
+  "kiryat_bialik": {
+    "hebrew": "קריית ביאליק",
+    "english": ["Kiryat Bialik"],
+    "description": "Kiryat Bialik"
+  },
+  "kiryat_ono": {
+    "hebrew": "קריית אונו",
+    "english": ["Kiryat Ono"],
+    "description": "Kiryat Ono"
+  },
+  "kiryat_shmona": {
+    "hebrew": "קריית שמונה",
+    "english": ["Kiryat Shmona"],
+    "description": "Kiryat Shmona"
+  },
+  "or_yehuda": {
+    "hebrew": "אור יהודה",
+    "english": ["Or Yehuda"],
+    "description": "Or Yehuda"
+  },
+  "ramat_hasharon": {
+    "hebrew": "רמת השרון",
+    "english": ["Ramat Hasharon", "Ramat HaSharon"],
+    "description": "Ramat Hasharon"
+  },
+  "hod_hasharon": {
+    "hebrew": "הוד השרון",
+    "english": ["Hod Hasharon", "Hod HaSharon"],
+    "description": "Hod Hasharon"
+  },
+  "beit_shemesh": {
+    "hebrew": "בית שמש",
+    "english": ["Beit Shemesh", "Bet Shemesh"],
+    "description": "Beit Shemesh"
+  },
+  "karmiel": {
+    "hebrew": "כרמיאל",
+    "english": ["Karmiel", "Carmiel"],
+    "description": "Karmiel"
+  },
+  "yehud": {
+    "hebrew": "יהוד",
+    "english": ["Yehud"],
+    "description": "Yehud"
+  },
+  "tiberias": {
+    "hebrew": "טבריה",
+    "english": ["Tiberias"],
+    "description": "Tiberias"
+  },
+  "tayibe": {
+    "hebrew": "טייבה",
+    "english": ["Tayibe", "Taibe"],
+    "description": "Tayibe"
+  },
+  "dimona": {
+    "hebrew": "דימונה",
+    "english": ["Dimona"],
+    "description": "Dimona"
+  },
+  "tamra": {
+    "hebrew": "טמרה",
+    "english": ["Tamra"],
+    "description": "Tamra"
+  },
+  "sakhnin": {
+    "hebrew": "סכנין",
+    "english": ["Sakhnin"],
+    "description": "Sakhnin"
+  },
+  "yoqneam": {
+    "hebrew": "יקנעם",
+    "english": ["Yoqneam", "Yokneam"],
+    "description": "Yoqneam"
+  },
+  "givat_shmuel": {
+    "hebrew": "גבעת שמואל",
+    "english": ["Givat Shmuel"],
+    "description": "Givat Shmuel"
+  },
+  "qalansawe": {
+    "hebrew": "קלנסווה",
+    "english": ["Qalansawe"],
+    "description": "Qalansawe"
+  },
+  "nesher": {
+    "hebrew": "נשר",
+    "english": ["Nesher"],
+    "description": "Nesher"
+  },
+  "beit_shean": {
+    "hebrew": "בית שאן",
+    "english": ["Beit She'an", "Bet Shean"],
+    "description": "Beit Shean"
+  },
+  "ofakim": {
+    "hebrew": "אופקים",
+    "english": ["Ofakim"],
+    "description": "Ofakim"
+  },
+  "netivot": {
+    "hebrew": "נתיבות",
+    "english": ["Netivot"],
+    "description": "Netivot"
+  },
+  "tirat_carmel": {
+    "hebrew": "טירת כרמל",
+    "english": ["Tirat Carmel"],
+    "description": "Tirat Carmel"
+  },
+  "azor": {
+    "hebrew": "אזור",
+    "english": ["Azor"],
+    "description": "Azor"
+  },
+  "ariel": {
+    "hebrew": "אריאל",
+    "english": ["Ariel"],
+    "description": "Ariel"
+  },
+  "arad": {
+    "hebrew": "ערד",
+    "english": ["Arad"],
+    "description": "Arad"
+  },
+  "migdal_haemek": {
+    "hebrew": "מגדל העמק",
+    "english": ["Migdal HaEmek"],
+    "description": "Migdal HaEmek"
+  },
+  "sderot": {
+    "hebrew": "שדרות",
+    "english": ["Sderot"],
+    "description": "Sderot"
+  },
+  "maalot_tarshiha": {
+    "hebrew": "מעלות-תרשיחא",
+    "english": ["Maalot-Tarshiha"],
+    "description": "Maalot-Tarshiha"
+  }
+}

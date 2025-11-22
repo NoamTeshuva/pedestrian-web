@@ -27,8 +27,8 @@ class CityNameResolver:
             mapping_file: Path to JSON mapping file. If None, uses default location.
         """
         if mapping_file is None:
-            # Default location
-            mapping_file = Path(__file__).parent.parent / "data" / "processed" / "israel" / "city_names_mapping.json"
+            # Default location in api directory
+            mapping_file = Path(__file__).parent / "city_names_mapping.json"
 
         self.mapping_file = Path(mapping_file)
         self.city_mapping: Dict = {}

@@ -66,23 +66,15 @@ def get_raster_url_from_vultr(raster_type: str, bounds: Tuple[float, float, floa
                 raster_file = city_raster
                 logging.info(f"Using city-specific {raster_type} raster for {city}")
             else:
-                logging.info(f"City-specific {raster_type} not found for {city}, falling back to national raster")
+                logging.info(f"City-specific {raster_type} not found for {city}")
 
-        # Fall back to national raster if city file not found or not requested
+        # If city-specific file not found, return None (we don't have national rasters in Vultr)
         if not raster_file:
-            national_rasters = {
-                'ndvi': 'data/processed/israel/rasters/israel_ndvi_sentinel2.tif',
-                'dem': 'data/processed/israel/rasters/israel_dem_copernicus30.tif'
-            }
-            raster_file = national_rasters.get(raster_type)
-
-            if not raster_file:
-                logging.warning(f"Unknown raster type: {raster_type}")
-                return None
-
-            if not storage.file_exists(raster_file):
-                logging.warning(f"National raster file not found in Vultr: {raster_file}")
-                return None
+            if city:
+                logging.info(f"City-specific {raster_type} not available for {city}, using default values")
+            else:
+                logging.info(f"No city specified for {raster_type}, using default values")
+            return None
 
         # Generate direct public URL (bucket has public read policy)
         # Format: https://bucket-name.endpoint/object-key
