@@ -80,21 +80,18 @@ edges_with_landuse = compute_landuse_edges(
 
 The `city` parameter should match the file names in Vultr (e.g., "tel_aviv", "haifa", "jerusalem").
 
-### 4. National Raster Fallback (Optional)
+### 4. National Raster Fallback
 
-National-level processed NDVI data exists in Vultr but in zip format:
-- `project/assets/browser_images/browser_images_8.zip` (40MB)
-- `project/assets/browser_images/browser_images_9.zip` (40MB)
+National-level processed rasters exist in Vultr for fallback:
+- ✓ `project/data/processed/israel/rasters/israel_ndvi_sentinel2.tif`
+- ✓ `project/data/processed/israel/rasters/israel_dem_copernicus30.tif`
 
-**Current Behavior:** When city-specific files aren't found, uses default values (fast, reasonable)
+**Current Behavior:**
+1. **Try city-specific rasters first** (fast, small files for 277 Israeli cities)
+2. **Fall back to national rasters** if city not in precomputed list
+3. **Use default values** if no rasters available
 
-**Optional Enhancement:** Extract these zips and upload as TIF files for true national fallback:
-1. Download and extract browser_images_8.zip and browser_images_9.zip
-2. Combine/process into single `data/processed/israel/rasters/israel_ndvi.tif`
-3. Upload to Vultr
-4. Update code to use as fallback
-
-**Note:** Downloading 40MB zips on every API call is not practical for production.
+This provides optimal performance for the 277 precomputed cities while maintaining functionality for edge cases.
 
 ### 5. Next Steps
 

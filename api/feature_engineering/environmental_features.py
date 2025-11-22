@@ -69,32 +69,23 @@ def get_raster_url_from_vultr(raster_type: str, bounds: Tuple[float, float, floa
                 logging.info(f"City-specific {raster_type} not found for {city}, trying national fallback")
 
         # If city-specific file not found, try national rasters as fallback
-        if not raster_file and raster_type == "ndvi":
-            # National NDVI data available in browser_images zips
-            # These are processed national NDVI rasters split into zip files
-            national_ndvi_files = [
-                "project/assets/browser_images/browser_images_8.zip",
-                "project/assets/browser_images/browser_images_9.zip"
-            ]
-
-            # Check if national NDVI files exist
-            # Note: These are zip files and would need extraction for use
-            # For now, we document their existence but use defaults (faster)
-            for ndvi_file in national_ndvi_files:
-                if storage.file_exists(ndvi_file):
-                    logging.info(f"National NDVI available at {ndvi_file} (zip format, using defaults for performance)")
-                    break
-
-            logging.info(f"Using default NDVI values (national rasters in zip format)")
-            return None
-
-        # If city-specific file not found and no national fallback available
         if not raster_file:
-            if city:
-                logging.info(f"City-specific {raster_type} not available for {city}, using default values")
+            # National rasters are in the project/ directory in Vultr
+            national_raster_map = {
+                "ndvi": "project/data/processed/israel/rasters/israel_ndvi_sentinel2.tif",
+                "dem": "project/data/processed/israel/rasters/israel_dem_copernicus30.tif"
+            }
+
+            national_raster = national_raster_map.get(raster_type)
+            if national_raster and storage.file_exists(national_raster):
+                raster_file = national_raster
+                logging.info(f"Using national {raster_type} raster as fallback: {national_raster}")
             else:
-                logging.info(f"No city specified for {raster_type}, using default values")
-            return None
+                if city:
+                    logging.info(f"City-specific {raster_type} not available for {city}, and no national fallback found, using default values")
+                else:
+                    logging.info(f"No city specified for {raster_type}, using default values")
+                return None
 
         # Generate direct public URL (bucket has public read policy)
         # Format: https://bucket-name.endpoint/object-key
