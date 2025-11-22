@@ -32,15 +32,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'api'))
 
 from feature_engineering.israel_weather_zones import generate_israel_weather_zones
 
+# Configure OSMnx to handle larger query areas
+ox.settings.max_query_area_size = 50000000000  # 50 billion m² (was 2.5 billion)
+
 
 def setup_logging():
     """Configure logging."""
+    # Create logs directory if it doesn't exist
+    log_dir = Path(__file__).parent.parent / 'logs'
+    log_dir.mkdir(exist_ok=True)
+
+    log_file = log_dir / 'network_precomputation.log'
+
+    # Configure logging to both file and console
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, mode='a'),
+            logging.StreamHandler()
+        ]
     )
     # Suppress OSMnx verbose logging
     logging.getLogger('osmnx').setLevel(logging.WARNING)
+
+    logging.info(f"Logging to: {log_file}")
 
 
 def download_network_for_zone(zone_geometry, zone_id: str, network_type: str = 'walk'):

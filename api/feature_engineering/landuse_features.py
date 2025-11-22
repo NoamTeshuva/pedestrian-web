@@ -105,19 +105,24 @@ def generate_cache_filename(place: Optional[str] = None,
         return f"bbox_{cache_key}_landuse.gpkg"
 
 
-def get_landuse_polygons(place: Optional[str] = None, 
-                        bbox: Optional[Tuple[float, float, float, float]] = None, 
-                        save_path: Optional[str] = None) -> gpd.GeoDataFrame:
+def get_landuse_polygons(place: Optional[str] = None,
+                        bbox: Optional[Tuple[float, float, float, float]] = None,
+                        save_path: Optional[str] = None,
+                        city: Optional[str] = None) -> gpd.GeoDataFrame:
     """Dynamically fetch and cache land use polygon layer for any place or bounding box.
-    
+
+    Tries to use precomputed city-specific landuse files from Vultr first for
+    Israeli cities, then falls back to OSMnx download if not available.
+
     Args:
         place: Place name (e.g., "Monaco", "Melbourne, Australia")
         bbox: Bounding box as (minx, miny, maxx, maxy) in EPSG:4326
         save_path: Custom save path. If None, uses temp directory.
-        
+        city: City name to check for precomputed landuse files in Vultr
+
     Returns:
         GeoDataFrame: Land use polygons with standardized schema
-        
+
     Raises:
         ValueError: If neither place nor bbox provided, or invalid coordinates
         OSError: If cache directory cannot be created
@@ -125,19 +130,45 @@ def get_landuse_polygons(place: Optional[str] = None,
     # Input validation
     if place is None and bbox is None:
         raise ValueError("Either 'place' or 'bbox' must be provided")
-    
+
     if place and not validate_place_name(place):
         raise ValueError(f"Invalid place name: '{place}'")
-    
+
     if bbox and not validate_coordinates(bbox):
         raise ValueError(f"Invalid bounding box coordinates: {bbox}")
-    
+
+    # Try to load precomputed city-specific landuse from Vultr first
+    if city:
+        try:
+            import sys
+            from pathlib import Path as PathLib
+            # Add parent directory to path to import storage_utils
+            sys.path.insert(0, str(PathLib(__file__).parent.parent))
+            from storage_utils import get_vultr_storage
+
+            storage = get_vultr_storage()
+            if storage:
+                city_landuse_path = f"data/processed/israel/cities/{city}/{city}_landuse.gpkg"
+                if storage.file_exists(city_landuse_path):
+                    logging.info(f"Loading precomputed landuse for {city} from Vultr")
+                    # Download to temp file and load
+                    temp_file = LandUseConfig.get_temp_dir() / f"{city}_landuse_vultr.gpkg"
+                    storage.download_file(city_landuse_path, str(temp_file))
+                    landuse = gpd.read_file(temp_file)
+                    logging.info(f"Loaded {len(landuse)} landuse polygons from precomputed file")
+                    return landuse
+                else:
+                    logging.info(f"Precomputed landuse not found for {city}, falling back to OSMnx")
+        except Exception as e:
+            logging.warning(f"Failed to load precomputed landuse for {city}: {e}")
+            logging.info("Falling back to OSMnx download")
+
     # Generate cache path
     if save_path is None:
         cache_name = generate_cache_filename(place, bbox)
         save_path = LandUseConfig.get_temp_dir() / cache_name
-    
-    # Check cache first
+
+    # Check local cache
     if os.path.exists(save_path):
         logging.info(f"Loading cached land use data from {save_path}")
         try:
@@ -145,18 +176,18 @@ def get_landuse_polygons(place: Optional[str] = None,
         except Exception as e:
             logging.warning(f"Failed to load cached file {save_path}: {e}")
             # Continue to re-download
-    
+
     # Download from OSM
     logging.info(f"Downloading land use data for {place or 'bbox'}")
     try:
         landuse = _fetch_osm_landuse(place, bbox)
-        
+
         # Process and filter data
         landuse = _process_landuse_data(landuse)
-        
+
         # Cache the result
         _save_landuse_cache(landuse, save_path)
-        
+
         return landuse
     except Exception as e:
         logging.warning(f"Failed to download land use data for {place or 'bbox'}: {e}")
@@ -242,18 +273,19 @@ def _save_landuse_cache(landuse: gpd.GeoDataFrame, save_path: Path) -> None:
         logging.warning(f"Failed to save cache file {save_path}: {e}")
 
 
-def compute_landuse_edges(edges_gdf: gpd.GeoDataFrame, 
-                         land_gdf: Optional[gpd.GeoDataFrame] = None, 
-                         allowed: Optional[Set[str]] = None, 
-                         buffer_m: int = LandUseConfig.BUFFER_METERS, 
-                         place: Optional[str] = None, 
-                         bbox: Optional[Tuple[float, float, float, float]] = None) -> gpd.GeoDataFrame:
+def compute_landuse_edges(edges_gdf: gpd.GeoDataFrame,
+                         land_gdf: Optional[gpd.GeoDataFrame] = None,
+                         allowed: Optional[Set[str]] = None,
+                         buffer_m: int = LandUseConfig.BUFFER_METERS,
+                         place: Optional[str] = None,
+                         bbox: Optional[Tuple[float, float, float, float]] = None,
+                         city: Optional[str] = None) -> gpd.GeoDataFrame:
     """Add land_use column to edges by buffering and finding nearest land use polygons.
-    
+
     This function performs spatial joining between street edges and land use polygons.
     Each edge is buffered by the specified distance, and the nearest land use polygon
     centroid within the buffer is assigned to that edge.
-    
+
     Args:
         edges_gdf: Street edges with geometry in EPSG:4326
         land_gdf: Pre-loaded land use polygons. If None, loads dynamically
@@ -261,10 +293,11 @@ def compute_landuse_edges(edges_gdf: gpd.GeoDataFrame,
         buffer_m: Buffer distance in meters for spatial assignment
         place: Place name for dynamic land use generation
         bbox: Bounding box for dynamic land use generation
-        
+        city: City name to use precomputed landuse files
+
     Returns:
         GeoDataFrame: Copy of edges_gdf with added 'land_use' column
-        
+
     Raises:
         ValueError: If edges_gdf is empty or missing geometry column
     """
@@ -273,42 +306,44 @@ def compute_landuse_edges(edges_gdf: gpd.GeoDataFrame,
         raise ValueError("edges_gdf cannot be empty")
     if 'geometry' not in edges_gdf.columns:
         raise ValueError("edges_gdf must have a 'geometry' column")
-    
+
     # Set defaults
     if allowed is None:
         allowed = LandUseConfig.DEFAULT_ALLOWED
-    
+
     # Load land use data
-    land_gdf = _get_or_load_landuse_data(land_gdf, place, bbox)
-    
+    land_gdf = _get_or_load_landuse_data(land_gdf, place, bbox, city)
+
     # Handle empty land use data
     if land_gdf.empty:
         return _assign_default_landuse(edges_gdf)
-    
+
     # Perform spatial assignment
     return _perform_spatial_landuse_assignment(edges_gdf, land_gdf, allowed, buffer_m)
     
 
-def _get_or_load_landuse_data(land_gdf: Optional[gpd.GeoDataFrame], 
-                             place: Optional[str], 
-                             bbox: Optional[Tuple[float, float, float, float]]) -> gpd.GeoDataFrame:
+def _get_or_load_landuse_data(land_gdf: Optional[gpd.GeoDataFrame],
+                             place: Optional[str],
+                             bbox: Optional[Tuple[float, float, float, float]],
+                             city: Optional[str] = None) -> gpd.GeoDataFrame:
     """Get or load land use data from various sources.
-    
+
     Args:
         land_gdf: Pre-loaded land use data
         place: Place name for dynamic loading
         bbox: Bounding box for dynamic loading
-        
+        city: City name to use precomputed files
+
     Returns:
         GeoDataFrame: Land use polygons
     """
     if land_gdf is not None:
         return land_gdf
-    
+
     try:
-        if place or bbox:
-            logging.info(f"Loading land use data for {place or 'bbox'}")
-            return get_landuse_polygons(place=place, bbox=bbox)
+        if place or bbox or city:
+            logging.info(f"Loading land use data for {city or place or 'bbox'}")
+            return get_landuse_polygons(place=place, bbox=bbox, city=city)
         else:
             # No dynamic parameters provided, return empty
             logging.warning("No land use data or location parameters provided")

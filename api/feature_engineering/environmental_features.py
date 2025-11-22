@@ -31,13 +31,17 @@ class EnvironmentalError(Exception):
         super().__init__(self.message)
 
 
-def get_raster_url_from_vultr(raster_type: str, bounds: Tuple[float, float, float, float]) -> Optional[str]:
+def get_raster_url_from_vultr(raster_type: str, bounds: Tuple[float, float, float, float], city: Optional[str] = None) -> Optional[str]:
     """
     Get presigned URL for raster file from Vultr storage.
+
+    Tries to use city-specific rasters first for better performance,
+    falls back to national rasters if city files not available.
 
     Args:
         raster_type: Type of raster ('ndvi' or 'dem')
         bounds: Bounding box (minx, miny, maxx, maxy) in EPSG:4326
+        city: Optional city name to use city-specific rasters
 
     Returns:
         Presigned URL or None if not available
@@ -53,21 +57,32 @@ def get_raster_url_from_vultr(raster_type: str, bounds: Tuple[float, float, floa
         if not storage:
             return None
 
-        # Map raster type to actual file paths in Vultr
-        raster_paths = {
-            'ndvi': 'project/data/processed/israel/rasters/israel_ndvi_sentinel2.tif',
-            'dem': 'project/data/processed/israel/rasters/israel_dem_copernicus30.tif'
-        }
+        raster_file = None
 
-        raster_file = raster_paths.get(raster_type)
+        # Try city-specific raster first if city is provided
+        if city:
+            city_raster = f"data/processed/israel/cities/{city}/{city}_{raster_type}.tif"
+            if storage.file_exists(city_raster):
+                raster_file = city_raster
+                logging.info(f"Using city-specific {raster_type} raster for {city}")
+            else:
+                logging.info(f"City-specific {raster_type} not found for {city}, falling back to national raster")
+
+        # Fall back to national raster if city file not found or not requested
         if not raster_file:
-            logging.warning(f"Unknown raster type: {raster_type}")
-            return None
+            national_rasters = {
+                'ndvi': 'data/processed/israel/rasters/israel_ndvi_sentinel2.tif',
+                'dem': 'data/processed/israel/rasters/israel_dem_copernicus30.tif'
+            }
+            raster_file = national_rasters.get(raster_type)
 
-        # Check if file exists in Vultr
-        if not storage.file_exists(raster_file):
-            logging.warning(f"Raster file not found in Vultr: {raster_file}")
-            return None
+            if not raster_file:
+                logging.warning(f"Unknown raster type: {raster_type}")
+                return None
+
+            if not storage.file_exists(raster_file):
+                logging.warning(f"National raster file not found in Vultr: {raster_file}")
+                return None
 
         # Generate direct public URL (bucket has public read policy)
         # Format: https://bucket-name.endpoint/object-key
@@ -331,7 +346,7 @@ def ndvi_to_canopy_pct(ndvi_values: np.ndarray) -> np.ndarray:
         return np.full(len(ndvi_values), 0.3)
 
 
-def compute_environmental_features(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = None) -> gpd.GeoDataFrame:
     """
     Add environmental features to street edges using real DEM and NDVI data.
 
@@ -344,6 +359,8 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     ----------
     gdf : GeoDataFrame
         Street edges to which environmental features will be added
+    city : str, optional
+        City name to use city-specific rasters (faster, smaller files)
 
     Returns
     -------
@@ -373,7 +390,7 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         use_real_data = False
 
         # Try NDVI data with 15m buffer for vegetation detection
-        ndvi_url = get_raster_url_from_vultr('ndvi', bounds)
+        ndvi_url = get_raster_url_from_vultr('ndvi', bounds, city=city)
         if ndvi_url:
             # Use buffer sampling for NDVI to capture roadside trees and parks
             # 15m buffer helps capture trees in parks/forests better
@@ -388,7 +405,7 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
                 logging.info(f"Canopy coverage (NDVI→%): mean={gdf['sensor_canopy_pct'].mean():.1%}, max={gdf['sensor_canopy_pct'].max():.1%}")
 
         # Try DEM data (no buffer needed for elevation)
-        dem_url = get_raster_url_from_vultr('dem', bounds)
+        dem_url = get_raster_url_from_vultr('dem', bounds, city=city)
         if dem_url:
             # Use center sampling only for DEM (elevation doesn't need buffer)
             dem_values = sample_raster_at_points(dem_url, gdf_wgs84, buffer_meters=0.0)
