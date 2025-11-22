@@ -80,9 +80,25 @@ edges_with_landuse = compute_landuse_edges(
 
 The `city` parameter should match the file names in Vultr (e.g., "tel_aviv", "haifa", "jerusalem").
 
-### 4. Next Steps
+### 4. National Raster Fallback (Optional)
 
-1. **Update app.py** to pass city parameter to feature engineering functions
+National-level processed NDVI data exists in Vultr but in zip format:
+- `project/assets/browser_images/browser_images_8.zip` (40MB)
+- `project/assets/browser_images/browser_images_9.zip` (40MB)
+
+**Current Behavior:** When city-specific files aren't found, uses default values (fast, reasonable)
+
+**Optional Enhancement:** Extract these zips and upload as TIF files for true national fallback:
+1. Download and extract browser_images_8.zip and browser_images_9.zip
+2. Combine/process into single `data/processed/israel/rasters/israel_ndvi.tif`
+3. Upload to Vultr
+4. Update code to use as fallback
+
+**Note:** Downloading 40MB zips on every API call is not practical for production.
+
+### 5. Next Steps
+
+1. ✅ **Update app.py** to pass city parameter to feature engineering functions
 2. **Test the API** to ensure it loads from the new structure correctly
 3. **Delete old directory** (optional): Remove `data/processed/israel/cities_landuse/` from Vultr after verification
 4. **Monitor performance**: Check that city-specific files are being used in logs

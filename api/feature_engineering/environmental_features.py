@@ -66,9 +66,29 @@ def get_raster_url_from_vultr(raster_type: str, bounds: Tuple[float, float, floa
                 raster_file = city_raster
                 logging.info(f"Using city-specific {raster_type} raster for {city}")
             else:
-                logging.info(f"City-specific {raster_type} not found for {city}")
+                logging.info(f"City-specific {raster_type} not found for {city}, trying national fallback")
 
-        # If city-specific file not found, return None (we don't have national rasters in Vultr)
+        # If city-specific file not found, try national rasters as fallback
+        if not raster_file and raster_type == "ndvi":
+            # National NDVI data available in browser_images zips
+            # These are processed national NDVI rasters split into zip files
+            national_ndvi_files = [
+                "project/assets/browser_images/browser_images_8.zip",
+                "project/assets/browser_images/browser_images_9.zip"
+            ]
+
+            # Check if national NDVI files exist
+            # Note: These are zip files and would need extraction for use
+            # For now, we document their existence but use defaults (faster)
+            for ndvi_file in national_ndvi_files:
+                if storage.file_exists(ndvi_file):
+                    logging.info(f"National NDVI available at {ndvi_file} (zip format, using defaults for performance)")
+                    break
+
+            logging.info(f"Using default NDVI values (national rasters in zip format)")
+            return None
+
+        # If city-specific file not found and no national fallback available
         if not raster_file:
             if city:
                 logging.info(f"City-specific {raster_type} not available for {city}, using default values")
