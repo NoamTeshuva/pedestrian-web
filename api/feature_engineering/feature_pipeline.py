@@ -7,6 +7,7 @@ Combines land use, centrality, highway, and temporal features into a single work
 Follows CLAUDE.md guidelines for production-ready, modular, and type-safe code.
 """
 import logging
+import os
 import time
 from datetime import datetime
 from functools import lru_cache
@@ -542,6 +543,11 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
 # Cached Pipeline Wrapper
 # =========================
 
+# IMPORTANT: @lru_cache is PER-PROCESS and will NOT share cache between Gunicorn workers.
+# If running with --workers 2 or more, each worker has its own separate cache.
+# Options:
+#   1. Run with --workers 1 for in-memory caching to work across endpoints
+#   2. Use persistent cache (file/DB/Redis) for multi-worker deployments
 @lru_cache(maxsize=64)
 def run_feature_pipeline_cached(
     place: Optional[str],
@@ -621,12 +627,20 @@ def run_feature_pipeline_cached_normalized(
         # Already a string
         timestamp_str = str(timestamp)
 
+    # DEBUG: Log cache key and process info BEFORE calling cached function
+    pid = os.getpid()
+    logging.info(f"[CACHE DEBUG] PID={pid} | Cache key: place={place}, bbox_key={bbox_key}, timestamp_str={timestamp_str}")
+
     # Call cached wrapper with hashable arguments
     features_gdf, metadata = run_feature_pipeline_cached(
         place=place,
         bbox_key=bbox_key,
         timestamp_str=timestamp_str
     )
+
+    # DEBUG: Log cache statistics AFTER calling cached function
+    cache_info = run_feature_pipeline_cached.cache_info()
+    logging.info(f"[CACHE DEBUG] PID={pid} | Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, size={cache_info.currsize}/{cache_info.maxsize}")
 
     # CRITICAL: Return a COPY of the GeoDataFrame
     # Each endpoint modifies temporal features (Hour, is_weekend, etc.)

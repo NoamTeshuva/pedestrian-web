@@ -1622,6 +1622,10 @@ def predict_gpkg():
 
         log_with_clear(f"GPKG prediction request for place={place}, bbox={bbox}, target_datetime={target_datetime}")
 
+        # DEBUG: Log endpoint entry with PID and parameters
+        import os
+        logging.info(f"[ENDPOINT /predict-gpkg] PID={os.getpid()} | place={place}, bbox={bbox}, timestamp={target_datetime.isoformat()}")
+
         if model is None:
             return jsonify({"error": "Model not available", "code": 503,
                             "details": "CatBoost model failed to load at startup"}), 503
@@ -2724,7 +2728,11 @@ def predict_multi():
         print("\n", end="")  # New line to separate from previous output
         start_loading_animation()
         update_progress("starting", 0, total_steps, f"מתחיל חיזוי עבור {place or 'bbox'}")
-        
+
+        # DEBUG: Log endpoint entry with PID and parameters
+        import os
+        logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}, timestamp={rep_ts.isoformat()}")
+
         # run pipeline ONCE (using cached version to avoid duplicate work)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
         from feature_engineering.feature_pipeline import run_feature_pipeline_cached_normalized
