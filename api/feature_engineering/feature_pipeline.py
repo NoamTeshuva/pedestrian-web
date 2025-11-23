@@ -70,6 +70,20 @@ except ImportError:
 class PipelineConfig:
     """Configuration constants for the feature extraction pipeline."""
 
+    # STATIC feature columns (extracted once, cached, time-independent)
+    STATIC_FEATURE_COLUMNS = [
+        # NETWORK (4)
+        "betweenness",            # Betweenness centrality (0-1)
+        "closeness",              # Closeness centrality (0-1)
+        "land_use",               # Categorical: residential/retail/commercial/other
+        "highway",                # Categorical: primary/secondary/residential/etc
+
+        # ENVIRONMENTAL (3)
+        "sensor_canopy_pct",      # Tree canopy coverage (0-1)
+        "terrain_complexity",     # Terrain complexity index (0-1)
+        "topographic_position",   # Topographic position index (0-1)
+    ]
+
     # PRODUCTION MODEL feature columns in expected order (15 features)
     # cb_model_3city_with_weather.cbm expects these exact features in this order
     FEATURE_COLUMNS = [
@@ -450,27 +464,33 @@ def extract_all_features(edges_gdf: gpd.GeoDataFrame,
             details={"n_edges": len(edges_gdf)}
         )
 
-def validate_features(features_gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
+def validate_features(features_gdf: gpd.GeoDataFrame,
+                     required_columns: Optional[List[str]] = None) -> Dict[str, Any]:
     """Validate extracted features and return validation summary.
-    
+
     Args:
         features_gdf: GeoDataFrame with extracted features
-        
+        required_columns: List of required column names. If None, uses all FEATURE_COLUMNS
+
     Returns:
         dict: Validation summary with statistics
-        
+
     Raises:
         PipelineError: If critical validation fails
     """
+    # Default to all features if not specified
+    if required_columns is None:
+        required_columns = PipelineConfig.FEATURE_COLUMNS
+
     validation_summary = {
         "n_edges": len(features_gdf),
         "missing_features": {},
         "feature_stats": {},
         "warnings": []
     }
-    
+
     # Check for missing required columns
-    missing_columns = [col for col in PipelineConfig.FEATURE_COLUMNS if col not in features_gdf.columns]
+    missing_columns = [col for col in required_columns if col not in features_gdf.columns]
     if missing_columns:
         raise PipelineError(
             f"Missing required feature columns: {missing_columns}",
@@ -479,7 +499,7 @@ def validate_features(features_gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
         )
     
     # Validate each feature
-    for col in PipelineConfig.FEATURE_COLUMNS:
+    for col in required_columns:
         if col in features_gdf.columns:
             series = features_gdf[col]
             
@@ -557,8 +577,8 @@ def run_static_feature_pipeline(place: Optional[str] = None,
             edges_gdf, graph, place=place, bbox=bbox
         )
 
-        # 4. Validate results
-        validation_summary = validate_features(features_gdf)
+        # 4. Validate results (only static features, not temporal/weather)
+        validation_summary = validate_features(features_gdf, required_columns=PipelineConfig.STATIC_FEATURE_COLUMNS)
 
         # 5. Compile metadata
         pipeline_metadata = {
