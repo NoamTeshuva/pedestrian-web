@@ -2910,6 +2910,11 @@ def predict_multi():
         import traceback
         stop_loading_animation()
         finish_progress("Error occurred")
+
+        # Log the full error to server logs for debugging
+        logging.error(f"ERROR in /predict-multi endpoint: {e}", exc_info=True)
+        logging.error(f"Full traceback:\n{traceback.format_exc()}")
+
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 

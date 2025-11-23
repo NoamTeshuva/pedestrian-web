@@ -492,11 +492,17 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
                         use_real_data = True
                         dem_success = True
 
-        # Fallback to defaults if real data unavailable
-        if not use_real_data:
-            logging.warning("Using default environmental values (Vultr storage not configured or data unavailable)")
+        # Ensure all required columns exist (fill missing columns with defaults)
+        if "sensor_canopy_pct" not in gdf.columns:
+            logging.warning("sensor_canopy_pct not set; using default 0.3")
             gdf["sensor_canopy_pct"] = 0.3
+
+        if "terrain_complexity" not in gdf.columns:
+            logging.warning("terrain_complexity not set; using default 0.5")
             gdf["terrain_complexity"] = 0.5
+
+        if "topographic_position" not in gdf.columns:
+            logging.warning("topographic_position not set; using default 0.5")
             gdf["topographic_position"] = 0.5
 
         return gdf
