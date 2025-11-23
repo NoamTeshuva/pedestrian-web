@@ -202,6 +202,115 @@ def extract_street_network(place: Optional[str] = None,
             details={"place": place, "bbox": bbox}
         )
 
+def extract_static_features(edges_gdf: gpd.GeoDataFrame,
+                           graph: nx.Graph,
+                           place: Optional[str] = None,
+                           bbox: Optional[Tuple[float, float, float, float]] = None) -> gpd.GeoDataFrame:
+    """Extract STATIC features only (no temporal, no weather).
+
+    This extracts features that don't change with time:
+    - Land use
+    - Centrality
+    - Highway types
+    - Environmental (NDVI/DEM)
+
+    Args:
+        edges_gdf: Street edges GeoDataFrame
+        graph: NetworkX graph for centrality computation
+        place: Place name for land use data
+        bbox: Bounding box for land use data
+
+    Returns:
+        GeoDataFrame: Edges with static features only
+
+    Raises:
+        PipelineError: If feature extraction fails
+    """
+    try:
+        result_gdf = edges_gdf.copy()
+        extraction_times = {}
+
+        # Try to resolve place to city name for per-city optimizations
+        city = None
+        if place and city_resolver:
+            try:
+                city = city_resolver.resolve(place)
+                if city:
+                    logging.info(f"Resolved '{place}' to city '{city}' for per-city optimizations")
+            except Exception as e:
+                logging.warning(f"Failed to resolve city name from '{place}': {e}")
+
+        # 1. Extract land use features
+        start_time = time.time()
+        try:
+            result_gdf = compute_landuse_edges(
+                result_gdf,
+                place=place,
+                bbox=bbox,
+                city=city
+            )
+            extraction_times['landuse'] = time.time() - start_time
+            log_with_clear(f"Land use extraction completed in {extraction_times['landuse']:.2f}s")
+        except LandUseError as e:
+            logging.error(f"Land use extraction failed: {e.message}")
+            result_gdf['land_use'] = 'other'
+            extraction_times['landuse'] = time.time() - start_time
+
+        # 2. Extract centrality features
+        start_time = time.time()
+        try:
+            sample_size = None
+            if len(graph.nodes) > PipelineConfig.MAX_NODES_FOR_EXACT_CENTRALITY:
+                sample_size = PipelineConfig.CENTRALITY_SAMPLE_SIZE
+
+            result_gdf = compute_centrality(graph, result_gdf, sample_size=sample_size)
+            extraction_times['centrality'] = time.time() - start_time
+            log_with_clear(f"Centrality extraction completed in {extraction_times['centrality']:.2f}s")
+        except CentralityError as e:
+            logging.error(f"Centrality extraction failed: {e.message}")
+            result_gdf['betweenness'] = 0.0
+            result_gdf['closeness'] = 0.0
+            extraction_times['centrality'] = time.time() - start_time
+
+        # 3. Extract highway features
+        start_time = time.time()
+        try:
+            result_gdf = compute_highway(result_gdf)
+            extraction_times['highway'] = time.time() - start_time
+            log_with_clear(f"Highway extraction completed in {extraction_times['highway']:.2f}s")
+        except HighwayError as e:
+            logging.error(f"Highway extraction failed: {e.message}")
+            result_gdf['highway'] = 'unclassified'
+            extraction_times['highway'] = time.time() - start_time
+
+        # 4. Extract environmental features (NDVI, DEM)
+        start_time = time.time()
+        try:
+            result_gdf = compute_environmental_features(result_gdf, city=city)
+            extraction_times['environmental'] = time.time() - start_time
+            log_with_clear(f"Environmental extraction completed in {extraction_times['environmental']:.2f}s")
+        except EnvironmentalError as e:
+            logging.error(f"Environmental extraction failed: {e.message}")
+            result_gdf['sensor_canopy_pct'] = 0.3
+            result_gdf['terrain_complexity'] = 0.5
+            result_gdf['topographic_position'] = 0.5
+            extraction_times['environmental'] = time.time() - start_time
+
+        # NO TEMPORAL OR WEATHER FEATURES - those are added by endpoints separately
+
+        total_time = sum(extraction_times.values())
+        log_with_clear(f"Static feature extraction completed in {total_time:.2f}s")
+        log_with_clear(f"Extraction breakdown: {extraction_times}")
+
+        return result_gdf
+
+    except Exception as e:
+        raise PipelineError(
+            f"Static feature extraction failed: {str(e)}",
+            code=500,
+            details={"n_edges": len(edges_gdf)}
+        )
+
 def extract_all_features(edges_gdf: gpd.GeoDataFrame,
                         graph: nx.Graph,
                         place: Optional[str] = None,
@@ -408,49 +517,115 @@ def validate_features(features_gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
     
     return validation_summary
 
-def run_feature_pipeline(place: Optional[str] = None,
-                        bbox: Optional[Tuple[float, float, float, float]] = None,
-                        timestamp: Optional[Union[str, datetime]] = None) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
-    """Run the complete feature extraction pipeline.
-    
-    This is the main entry point that orchestrates all feature extraction steps:
-    1. Input validation
-    2. Street network extraction
-    3. Feature extraction (land use, centrality, highway, temporal)
-    4. Feature validation
-    5. Return processed data ready for model prediction
-    
+def run_static_feature_pipeline(place: Optional[str] = None,
+                                bbox: Optional[Tuple[float, float, float, float]] = None) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
+    """Run feature extraction for STATIC features only (no timestamp-dependent features).
+
+    This extracts only the features that don't change with time:
+    - Street network structure
+    - Land use
+    - Centrality
+    - Highway types
+    - Environmental (NDVI, DEM)
+
+    Temporal and weather features are NOT included (add them separately).
+
     Args:
-        place: Place name (e.g., "Monaco", "Tel Aviv") 
+        place: Place name (e.g., "Monaco", "Tel Aviv")
         bbox: Bounding box as (minx, miny, maxx, maxy) in EPSG:4326
-        timestamp: Timestamp for temporal features (ISO format or datetime)
-        
+
     Returns:
         tuple: (features_gdf, pipeline_metadata)
-            - features_gdf: GeoDataFrame with all features extracted
-            - pipeline_metadata: Dict with processing statistics and validation info
-            
+            - features_gdf: GeoDataFrame with static features only
+            - pipeline_metadata: Dict with processing statistics
+
     Raises:
         PipelineError: If any step in the pipeline fails
     """
     pipeline_start = time.time()
-    
+
+    try:
+        # 1. Validate inputs (no timestamp needed)
+        validate_pipeline_inputs(place, bbox, timestamp=None)
+        log_with_clear(f"Starting STATIC feature pipeline for {place or 'bbox'}")
+
+        # 2. Extract street network
+        graph, edges_gdf = extract_street_network(place, bbox)
+
+        # 3. Extract STATIC features only (no temporal, no weather)
+        features_gdf = extract_static_features(
+            edges_gdf, graph, place=place, bbox=bbox
+        )
+
+        # 4. Validate results
+        validation_summary = validate_features(features_gdf)
+
+        # 5. Compile metadata
+        pipeline_metadata = {
+            "processing_time": time.time() - pipeline_start,
+            "location": {"place": place, "bbox": bbox},
+            "network_stats": {
+                "n_nodes": len(graph.nodes),
+                "n_edges": len(features_gdf)
+            },
+            "validation": validation_summary,
+            "feature_type": "static_only"
+        }
+
+        log_with_clear(f"Static pipeline completed in {pipeline_metadata['processing_time']:.2f}s")
+
+        return features_gdf, pipeline_metadata
+
+    except Exception as e:
+        if isinstance(e, PipelineError):
+            raise
+        else:
+            raise PipelineError(
+                f"Static pipeline execution failed: {str(e)}",
+                code=500,
+                details={"place": place, "bbox": bbox}
+            )
+
+def run_feature_pipeline(place: Optional[str] = None,
+                        bbox: Optional[Tuple[float, float, float, float]] = None,
+                        timestamp: Optional[Union[str, datetime]] = None) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
+    """Run the complete feature extraction pipeline (LEGACY - use run_static_feature_pipeline instead).
+
+    This is kept for backward compatibility but should be replaced with:
+    1. run_static_feature_pipeline() for cacheable features
+    2. Manual temporal/weather addition for dynamic features
+
+    Args:
+        place: Place name (e.g., "Monaco", "Tel Aviv")
+        bbox: Bounding box as (minx, miny, maxx, maxy) in EPSG:4326
+        timestamp: Timestamp for temporal features (ISO format or datetime)
+
+    Returns:
+        tuple: (features_gdf, pipeline_metadata)
+            - features_gdf: GeoDataFrame with all features extracted
+            - pipeline_metadata: Dict with processing statistics and validation info
+
+    Raises:
+        PipelineError: If any step in the pipeline fails
+    """
+    pipeline_start = time.time()
+
     try:
         # 1. Validate inputs
         validate_pipeline_inputs(place, bbox, timestamp)
         log_with_clear(f"Starting feature pipeline for {place or 'bbox'}")
-        
+
         # 2. Extract street network
         graph, edges_gdf = extract_street_network(place, bbox)
-        
+
         # 3. Extract all features
         features_gdf = extract_all_features(
             edges_gdf, graph, place=place, bbox=bbox, timestamp=timestamp
         )
-        
+
         # 4. Validate results
         validation_summary = validate_features(features_gdf)
-        
+
         # 5. Compile metadata
         pipeline_metadata = {
             "processing_time": time.time() - pipeline_start,
@@ -464,11 +639,11 @@ def run_feature_pipeline(place: Optional[str] = None,
             "feature_columns": PipelineConfig.FEATURE_COLUMNS,
             "categorical_columns": PipelineConfig.CATEGORICAL_COLUMNS
         }
-        
+
         log_with_clear(f"Pipeline completed successfully in {pipeline_metadata['processing_time']:.2f}s")
-        
+
         return features_gdf, pipeline_metadata
-        
+
     except Exception as e:
         if isinstance(e, PipelineError):
             raise
@@ -548,6 +723,36 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
 # Options:
 #   1. Run with --workers 1 for in-memory caching to work across endpoints
 #   2. Use persistent cache (file/DB/Redis) for multi-worker deployments
+
+@lru_cache(maxsize=64)
+def run_static_feature_pipeline_cached(
+    place: Optional[str],
+    bbox_key: Optional[Tuple[float, float, float, float]]
+) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
+    """
+    Cached wrapper for run_static_feature_pipeline.
+
+    Cache key: (place, bbox) only - NO timestamp!
+    This allows perfect cache reuse between /predict-multi and /predict-gpkg
+    since static features don't change with time.
+
+    Args:
+        place: Place name (e.g., "Monaco", "Tel Aviv")
+        bbox_key: Bounding box as hashable tuple (west, south, east, north) or None
+
+    Returns:
+        tuple: (features_gdf, pipeline_metadata) with STATIC features only
+
+    Note:
+        Returns features WITHOUT temporal/weather. Endpoints must add those separately.
+    """
+    # Call the static pipeline (no timestamp parameter)
+    return run_static_feature_pipeline(
+        place=place,
+        bbox=bbox_key
+    )
+
+# LEGACY: Old cached function with timestamp - kept for backward compatibility
 @lru_cache(maxsize=64)
 def run_feature_pipeline_cached(
     place: Optional[str],
@@ -555,11 +760,9 @@ def run_feature_pipeline_cached(
     timestamp_str: Optional[str]
 ) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
     """
-    Cached wrapper for run_feature_pipeline.
+    LEGACY: Cached wrapper for run_feature_pipeline (includes timestamp).
 
-    This wrapper enables caching of expensive feature extraction to avoid
-    recomputing the same features when multiple endpoints (e.g., /predict-multi
-    and /predict-gpkg) request features for the same place/bbox.
+    USE run_static_feature_pipeline_cached instead for better cache hits!
 
     Args:
         place: Place name (e.g., "Monaco", "Tel Aviv")
@@ -568,10 +771,6 @@ def run_feature_pipeline_cached(
 
     Returns:
         tuple: (features_gdf, pipeline_metadata) same as run_feature_pipeline
-
-    Note:
-        All arguments must be hashable for LRU cache to work. GeoDataFrames and
-        datetime objects are converted to/from hashable types by the normalized wrapper.
     """
     # Convert timestamp string back to datetime if provided
     timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
@@ -584,16 +783,65 @@ def run_feature_pipeline_cached(
     )
 
 
+def run_static_feature_pipeline_cached_normalized(
+    place: Optional[str] = None,
+    bbox: Optional[Tuple[float, float, float, float]] = None
+) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
+    """
+    Normalized wrapper for cached STATIC feature pipeline.
+
+    This returns features WITHOUT temporal/weather. Endpoints must add those separately.
+
+    Cache key: (place, bbox) only - NO timestamp!
+    Perfect cache reuse between endpoints for the same location.
+
+    Args:
+        place: Place name (e.g., "Monaco", "Tel Aviv")
+        bbox: Bounding box as tuple/list (west, south, east, north) or None
+
+    Returns:
+        tuple: (features_gdf COPY, pipeline_metadata) with STATIC features only
+
+    Example:
+        # Both endpoints can use the same cached static features:
+        static_gdf, metadata = run_static_feature_pipeline_cached_normalized(
+            place="Tel Aviv",
+            bbox=None
+        )
+        # Then each endpoint adds its own temporal/weather features
+    """
+    # Normalize bbox to hashable tuple
+    bbox_key = tuple(bbox) if bbox is not None else None
+
+    # DEBUG: Log cache key and process info BEFORE calling cached function
+    pid = os.getpid()
+    logging.info(f"[STATIC CACHE DEBUG] PID={pid} | Cache key: place={place}, bbox_key={bbox_key}")
+
+    # Call cached wrapper with hashable arguments (NO TIMESTAMP!)
+    features_gdf, metadata = run_static_feature_pipeline_cached(
+        place=place,
+        bbox_key=bbox_key
+    )
+
+    # DEBUG: Log cache statistics AFTER calling cached function
+    cache_info = run_static_feature_pipeline_cached.cache_info()
+    logging.info(f"[STATIC CACHE DEBUG] PID={pid} | Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, size={cache_info.currsize}/{cache_info.maxsize}")
+
+    # CRITICAL: Return a COPY of the GeoDataFrame
+    # Each endpoint modifies temporal features (Hour, is_weekend, etc.)
+    # If we return the same object, modifications corrupt the cache
+    return features_gdf.copy(), metadata
+
+# LEGACY: Old normalized function with timestamp
 def run_feature_pipeline_cached_normalized(
     place: Optional[str] = None,
     bbox: Optional[Tuple[float, float, float, float]] = None,
     timestamp: Optional[Union[str, datetime]] = None
 ) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
     """
-    Normalized wrapper for cached pipeline that handles type conversion.
+    LEGACY: Normalized wrapper for cached pipeline with timestamp.
 
-    This function normalizes input types to hashable forms before calling the
-    cached wrapper, making it easy to use from API endpoints.
+    USE run_static_feature_pipeline_cached_normalized instead for better cache hits!
 
     Args:
         place: Place name (e.g., "Monaco", "Tel Aviv")
@@ -602,18 +850,6 @@ def run_feature_pipeline_cached_normalized(
 
     Returns:
         tuple: (features_gdf COPY, pipeline_metadata) from cached pipeline
-
-    Example:
-        # Both endpoints can use the same cached result:
-        features_gdf, metadata = run_feature_pipeline_cached_normalized(
-            place="Tel Aviv",
-            bbox=None,
-            timestamp=None
-        )
-
-    Note:
-        Returns a COPY of the cached GeoDataFrame to prevent endpoints from
-        modifying the cached object (which would corrupt subsequent calls).
     """
     # Normalize bbox to hashable tuple
     bbox_key = tuple(bbox) if bbox is not None else None
@@ -629,7 +865,7 @@ def run_feature_pipeline_cached_normalized(
 
     # DEBUG: Log cache key and process info BEFORE calling cached function
     pid = os.getpid()
-    logging.info(f"[CACHE DEBUG] PID={pid} | Cache key: place={place}, bbox_key={bbox_key}, timestamp_str={timestamp_str}")
+    logging.info(f"[LEGACY CACHE DEBUG] PID={pid} | Cache key: place={place}, bbox_key={bbox_key}, timestamp_str={timestamp_str}")
 
     # Call cached wrapper with hashable arguments
     features_gdf, metadata = run_feature_pipeline_cached(
@@ -640,7 +876,7 @@ def run_feature_pipeline_cached_normalized(
 
     # DEBUG: Log cache statistics AFTER calling cached function
     cache_info = run_feature_pipeline_cached.cache_info()
-    logging.info(f"[CACHE DEBUG] PID={pid} | Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, size={cache_info.currsize}/{cache_info.maxsize}")
+    logging.info(f"[LEGACY CACHE DEBUG] PID={pid} | Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, size={cache_info.currsize}/{cache_info.maxsize}")
 
     # CRITICAL: Return a COPY of the GeoDataFrame
     # Each endpoint modifies temporal features (Hour, is_weekend, etc.)

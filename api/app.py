@@ -1630,23 +1630,30 @@ def predict_gpkg():
             return jsonify({"error": "Model not available", "code": 503,
                             "details": "CatBoost model failed to load at startup"}), 503
 
-        # Feature pipeline (using cached version to avoid duplicate work)
-        from feature_engineering.feature_pipeline import run_feature_pipeline_cached_normalized
-        features_gdf, pipeline_metadata = run_feature_pipeline_cached_normalized(
+        # Get STATIC features from cache (no timestamp - perfect cache reuse!)
+        from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
+        features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
             place=place,
-            bbox=bbox,
-            timestamp=target_datetime.isoformat()
+            bbox=bbox
         )
-        
+
         # Start loading animation again after pipeline completion
         start_loading_animation()
-        
-        # Override time-based features with search parameters
+
+        # Add temporal features based on search parameters
         if len(features_gdf) > 0:
             search_features = search_params['features']
             features_gdf['Hour'] = search_features['Hour']
             features_gdf['is_weekend'] = search_features['is_weekend']
             features_gdf['time_of_day'] = search_features['time_of_day']
+
+            # Add weather features for this specific timestamp
+            from feature_engineering.weather_features import compute_weather_features
+            features_gdf = compute_weather_features(
+                features_gdf,
+                timestamp=target_datetime,
+                time_of_day=search_features['time_of_day']
+            )
         
         # Prepare features for model
         model_features = prepare_model_features(features_gdf)
@@ -2731,15 +2738,14 @@ def predict_multi():
 
         # DEBUG: Log endpoint entry with PID and parameters
         import os
-        logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}, timestamp={rep_ts.isoformat()}")
+        logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}")
 
-        # run pipeline ONCE (using cached version to avoid duplicate work)
+        # Get STATIC features from cache (no timestamp - perfect cache reuse!)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
-        from feature_engineering.feature_pipeline import run_feature_pipeline_cached_normalized
-        features_gdf, pipeline_metadata = run_feature_pipeline_cached_normalized(
+        from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
+        features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
             place=place,
-            bbox=bbox,
-            timestamp=rep_ts.isoformat(),
+            bbox=bbox
         )
         update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
 
