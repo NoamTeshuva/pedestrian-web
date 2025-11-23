@@ -2764,9 +2764,16 @@ def predict_multi():
         for season, time_of_day in unique_combinations:
             # Create a timestamp for this season
             season_ts = build_search_timestamp(season, "weekday", time_of_day)
+
+            # Create a temporary GeoDataFrame with temporal features for weather computation
+            temp_gdf = features_gdf.copy()
+            temp_gdf['Hour'] = season_ts.hour
+            temp_gdf['is_weekend'] = is_israeli_weekend(season_ts)
+            temp_gdf['time_of_day'] = time_of_day
+
             # Extract weather for this season and time of day (averaged across 5 days and specific hours)
             weather_gdf = compute_weather_features(
-                features_gdf.copy(),
+                temp_gdf,
                 timestamp=season_ts,
                 time_of_day=time_of_day
             )
