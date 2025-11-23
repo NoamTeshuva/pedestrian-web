@@ -595,7 +595,7 @@ def run_feature_pipeline_cached_normalized(
         timestamp: ISO timestamp string or datetime object or None
 
     Returns:
-        tuple: (features_gdf, pipeline_metadata) from cached pipeline
+        tuple: (features_gdf COPY, pipeline_metadata) from cached pipeline
 
     Example:
         # Both endpoints can use the same cached result:
@@ -604,6 +604,10 @@ def run_feature_pipeline_cached_normalized(
             bbox=None,
             timestamp=None
         )
+
+    Note:
+        Returns a COPY of the cached GeoDataFrame to prevent endpoints from
+        modifying the cached object (which would corrupt subsequent calls).
     """
     # Normalize bbox to hashable tuple
     bbox_key = tuple(bbox) if bbox is not None else None
@@ -618,11 +622,16 @@ def run_feature_pipeline_cached_normalized(
         timestamp_str = str(timestamp)
 
     # Call cached wrapper with hashable arguments
-    return run_feature_pipeline_cached(
+    features_gdf, metadata = run_feature_pipeline_cached(
         place=place,
         bbox_key=bbox_key,
         timestamp_str=timestamp_str
     )
+
+    # CRITICAL: Return a COPY of the GeoDataFrame
+    # Each endpoint modifies temporal features (Hour, is_weekend, etc.)
+    # If we return the same object, modifications corrupt the cache
+    return features_gdf.copy(), metadata
 
 def example_usage():
     """Example of how to use the feature pipeline."""
