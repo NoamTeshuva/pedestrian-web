@@ -1645,6 +1645,8 @@ def predict_gpkg():
         if len(features_gdf) > 0:
             search_features = search_params['features']
             features_gdf['Hour'] = search_features['Hour']
+            features_gdf['Month'] = search_features['Month']
+            features_gdf['DayOfWeek'] = search_features['DayOfWeek']
             features_gdf['is_weekend'] = search_features['is_weekend']
             features_gdf['time_of_day'] = search_features['time_of_day']
 
