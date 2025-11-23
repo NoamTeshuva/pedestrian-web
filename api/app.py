@@ -324,9 +324,10 @@ def parse_search_parameters(request_args) -> dict:
     # Extract final features
     features = {
         'Hour': target_datetime.hour,
+        'Month': target_datetime.month,
+        'DayOfWeek': target_datetime.weekday(),  # 0=Monday, 6=Sunday
         'is_weekend': is_israeli_weekend(target_datetime),
         'time_of_day': get_time_of_day_from_hour(target_datetime.hour),
-        'month': target_datetime.month,
         'season': get_season_from_month(target_datetime.month)
     }
     
@@ -2819,6 +2820,8 @@ def predict_multi():
                         "time_of_day": tod,
                     })
                     gdf['Hour'] = sp['features']['Hour']
+                    gdf['Month'] = sp['features']['Month']
+                    gdf['DayOfWeek'] = sp['features']['DayOfWeek']
                     gdf['is_weekend'] = sp['features']['is_weekend']
                     gdf['time_of_day'] = sp['features']['time_of_day']
 
