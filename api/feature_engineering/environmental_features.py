@@ -215,6 +215,11 @@ def sample_raster_at_points(raster_url: str, gdf: gpd.GeoDataFrame, buffer_meter
                 # Reshape to (n_streets, 3) for center + left + right samples
                 values_reshaped = values_array.reshape(n_streets, 3)
 
+                # Check if all values are NaN (no coverage)
+                if np.isnan(values_reshaped).all():
+                    logging.warning("All sampled raster values are NaN (no coverage for this area)")
+                    return np.full(n_streets, np.nan)
+
                 # Take maximum value across center and buffer samples
                 # This captures roadside vegetation better than just center sampling
                 result_values = np.nanmax(values_reshaped, axis=1)
@@ -225,7 +230,7 @@ def sample_raster_at_points(raster_url: str, gdf: gpd.GeoDataFrame, buffer_meter
             return result_values
 
     except Exception as e:
-        logging.error(f"Failed to sample raster: {e}")
+        logging.error(f"Failed to sample raster: {e}", exc_info=True)
         return None
 
 
@@ -243,6 +248,11 @@ def calculate_terrain_complexity(dem_values: np.ndarray, gdf: gpd.GeoDataFrame) 
         Normalized complexity values [0-1]
     """
     try:
+        # Check if all values are NaN (no coverage)
+        if np.isnan(dem_values).all():
+            logging.warning("All DEM values are NaN (no coverage); using default terrain complexity")
+            return np.full(len(dem_values), 0.5)
+
         # Simple approach: use elevation range/variance as complexity
         # In production, this would use a proper TPI (Topographic Position Index) calculation
 
@@ -255,11 +265,13 @@ def calculate_terrain_complexity(dem_values: np.ndarray, gdf: gpd.GeoDataFrame) 
             # Handle NaN in variance
             variance = np.where(np.isnan(variance), 0, variance)
 
-            # Normalize to 0-1
-            if np.nanmax(variance) > 0:
-                complexity = variance / np.nanmax(variance)
-            else:
+            # Check if we have any non-zero variance
+            valid_variance = variance[~np.isnan(variance)]
+            if len(valid_variance) == 0 or np.nanmax(variance) == 0:
                 complexity = np.full_like(dem_values, 0.5)
+            else:
+                # Normalize to 0-1
+                complexity = variance / np.nanmax(variance)
         else:
             complexity = np.full_like(dem_values, 0.5)
 
@@ -268,7 +280,7 @@ def calculate_terrain_complexity(dem_values: np.ndarray, gdf: gpd.GeoDataFrame) 
         return complexity
 
     except Exception as e:
-        logging.error(f"Failed to calculate terrain complexity: {e}")
+        logging.error(f"Failed to calculate terrain complexity: {e}", exc_info=True)
         return np.full(len(dem_values), 0.5)
 
 
@@ -287,9 +299,20 @@ def calculate_topographic_position(dem_values: np.ndarray) -> np.ndarray:
     """
     try:
         if len(dem_values) > 1:
+            # Check if all values are NaN (no coverage)
+            if np.isnan(dem_values).all():
+                logging.warning("All DEM values are NaN (no coverage); using default TPI")
+                return np.full(len(dem_values), 0.5)
+
             # Use nanmean to handle NaN values
             mean_elev = np.nanmean(dem_values)
             tpi = dem_values - mean_elev
+
+            # Check if we have any valid values for normalization
+            valid_tpi = tpi[~np.isnan(tpi)]
+            if len(valid_tpi) == 0:
+                logging.warning("No valid DEM values for TPI calculation; using defaults")
+                return np.full(len(dem_values), 0.5)
 
             # Normalize to 0-1 range using nanmin, nanmax
             tpi_range = np.nanmax(tpi) - np.nanmin(tpi)
@@ -305,7 +328,7 @@ def calculate_topographic_position(dem_values: np.ndarray) -> np.ndarray:
         return tpi_norm
 
     except Exception as e:
-        logging.error(f"Failed to calculate topographic position: {e}")
+        logging.error(f"Failed to calculate topographic position: {e}", exc_info=True)
         return np.full(len(dem_values), 0.5)
 
 
@@ -401,11 +424,17 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
             if ndvi_values is not None and len(ndvi_values) == len(gdf):
                 # Log NDVI statistics before conversion
                 valid_ndvi = ndvi_values[~np.isnan(ndvi_values)]
-                logging.info(f"Sampled NDVI with 15m buffer: min={valid_ndvi.min():.3f}, max={valid_ndvi.max():.3f}, mean={valid_ndvi.mean():.3f}, median={np.median(valid_ndvi):.3f}")
 
-                gdf["sensor_canopy_pct"] = ndvi_to_canopy_pct(ndvi_values)
-                use_real_data = True
-                logging.info(f"Canopy coverage (NDVI→%): mean={gdf['sensor_canopy_pct'].mean():.1%}, max={gdf['sensor_canopy_pct'].max():.1%}")
+                # Check if we have any valid NDVI values
+                if len(valid_ndvi) > 0:
+                    logging.info(f"Sampled NDVI with 15m buffer: min={valid_ndvi.min():.3f}, max={valid_ndvi.max():.3f}, mean={valid_ndvi.mean():.3f}, median={np.median(valid_ndvi):.3f}")
+                    gdf["sensor_canopy_pct"] = ndvi_to_canopy_pct(ndvi_values)
+                    use_real_data = True
+                    logging.info(f"Canopy coverage (NDVI→%): mean={gdf['sensor_canopy_pct'].mean():.1%}, max={gdf['sensor_canopy_pct'].max():.1%}")
+                else:
+                    # All values are NaN - no coverage for this area
+                    logging.warning(f"NDVI coverage missing for this area (all NaN values); filling with defaults")
+                    gdf["sensor_canopy_pct"] = 0.3
 
         # Try DEM data (no buffer needed for elevation)
         dem_url = get_raster_url_from_vultr('dem', bounds, city=city)
@@ -429,7 +458,7 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
 
     except Exception as e:
         # Graceful degradation: use defaults on error
-        logging.error(f"Environmental feature extraction failed: {e}. Using defaults.")
+        logging.error(f"Environmental feature extraction failed: {e}. Using defaults.", exc_info=True)
         gdf = gdf.copy()
         gdf["sensor_canopy_pct"] = 0.3
         gdf["terrain_complexity"] = 0.5
