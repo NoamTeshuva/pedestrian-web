@@ -58,15 +58,15 @@ class DiskCache:
         """
         try:
             cache_key = self._get_cache_key(place, bbox)
-            gpkg_file = self.cache_dir / f"{cache_key}.gpkg"
+            parquet_file = self.cache_dir / f"{cache_key}.parquet"
             metadata_file = self.cache_dir / f"{cache_key}_metadata.json"
 
-            if not gpkg_file.exists() or not metadata_file.exists():
+            if not parquet_file.exists() or not metadata_file.exists():
                 logging.debug(f"[DISK CACHE] MISS: {place or bbox}")
                 return None
 
-            # Load GeoDataFrame
-            gdf = gpd.read_file(str(gpkg_file))
+            # Load GeoDataFrame from Parquet (faster and more reliable than GPKG)
+            gdf = gpd.read_parquet(str(parquet_file))
 
             # Load metadata
             with open(metadata_file, 'r') as f:
@@ -91,11 +91,12 @@ class DiskCache:
         """
         try:
             cache_key = self._get_cache_key(place, bbox)
-            gpkg_file = self.cache_dir / f"{cache_key}.gpkg"
+            parquet_file = self.cache_dir / f"{cache_key}.parquet"
             metadata_file = self.cache_dir / f"{cache_key}_metadata.json"
 
-            # Save GeoDataFrame
-            gdf.to_file(str(gpkg_file), driver="GPKG")
+            # Save GeoDataFrame as Parquet (faster and more reliable than GPKG)
+            # Parquet doesn't use Fiona, avoiding compatibility issues
+            gdf.to_parquet(str(parquet_file))
 
             # Save metadata (make it JSON-serializable)
             serializable_metadata = self._make_serializable(metadata)
