@@ -226,15 +226,32 @@ def _compute_centrality_measures(G: nx.Graph, sample_size: Optional[int]) -> Dic
     """
     # Compute betweenness centrality (potentially sampled)
     betweenness = nx.betweenness_centrality(
-        G, 
-        k=sample_size, 
-        normalized=True, 
+        G,
+        k=sample_size,
+        normalized=True,
         weight="length"
     )
-    
+
     # Compute closeness centrality (always exact)
     closeness = nx.closeness_centrality(G, distance="length")
-    
+
+    # Normalize closeness to 0-1 range (betweenness is already normalized)
+    # This ensures both metrics are on the same scale for frontend display
+    if closeness:
+        max_closeness = max(closeness.values()) if closeness.values() else 1.0
+        min_closeness = min(closeness.values()) if closeness.values() else 0.0
+        closeness_range = max_closeness - min_closeness
+
+        if closeness_range > 0:
+            # Normalize to 0-1
+            closeness = {
+                node: (value - min_closeness) / closeness_range
+                for node, value in closeness.items()
+            }
+        else:
+            # All values are the same, set to 0.5
+            closeness = {node: 0.5 for node in closeness.keys()}
+
     return {
         'betweenness': betweenness,
         'closeness': closeness
