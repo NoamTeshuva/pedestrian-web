@@ -422,6 +422,8 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
 
         # Try NDVI data with 15m buffer for vegetation detection
         ndvi_url = get_raster_url_from_vultr('ndvi', bounds, city=city)
+        ndvi_success = False
+
         if ndvi_url:
             # Use buffer sampling for NDVI to capture roadside trees and parks
             # 15m buffer helps capture trees in parks/forests better
@@ -435,14 +437,30 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
                     logging.info(f"Sampled NDVI with 15m buffer: min={valid_ndvi.min():.3f}, max={valid_ndvi.max():.3f}, mean={valid_ndvi.mean():.3f}, median={np.median(valid_ndvi):.3f}")
                     gdf["sensor_canopy_pct"] = ndvi_to_canopy_pct(ndvi_values)
                     use_real_data = True
+                    ndvi_success = True
                     logging.info(f"Canopy coverage (NDVI→%): mean={gdf['sensor_canopy_pct'].mean():.1%}, max={gdf['sensor_canopy_pct'].max():.1%}")
                 else:
-                    # All values are NaN - no coverage for this area
-                    logging.warning(f"NDVI coverage missing for this area (all NaN values); filling with defaults")
-                    gdf["sensor_canopy_pct"] = 0.3
+                    # City-specific raster has no coverage - try national fallback
+                    logging.warning(f"City-specific NDVI has no coverage for this area; trying national fallback")
+
+        # If city-specific NDVI failed or had no coverage, try national raster
+        if not ndvi_success:
+            national_ndvi_url = get_raster_url_from_vultr('ndvi', bounds, city=None)  # city=None forces national
+            if national_ndvi_url and national_ndvi_url != ndvi_url:  # Don't retry same URL
+                logging.info(f"Attempting national NDVI fallback")
+                ndvi_values = sample_raster_at_points(national_ndvi_url, gdf_wgs84, buffer_meters=15.0)
+                if ndvi_values is not None and len(ndvi_values) == len(gdf):
+                    valid_ndvi = ndvi_values[~np.isnan(ndvi_values)]
+                    if len(valid_ndvi) > 0:
+                        logging.info(f"National NDVI successful: min={valid_ndvi.min():.3f}, max={valid_ndvi.max():.3f}")
+                        gdf["sensor_canopy_pct"] = ndvi_to_canopy_pct(ndvi_values)
+                        use_real_data = True
+                        ndvi_success = True
 
         # Try DEM data (no buffer needed for elevation)
         dem_url = get_raster_url_from_vultr('dem', bounds, city=city)
+        dem_success = False
+
         if dem_url:
             # Use center sampling only for DEM (elevation doesn't need buffer)
             dem_values = sample_raster_at_points(dem_url, gdf_wgs84, buffer_meters=0.0)
@@ -453,12 +471,26 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
                     gdf["terrain_complexity"] = calculate_terrain_complexity(dem_values, gdf_wgs84)
                     gdf["topographic_position"] = calculate_topographic_position(dem_values)
                     use_real_data = True
+                    dem_success = True
                     logging.info(f"Extracted terrain features from DEM")
                 else:
-                    # All DEM values are NaN - no coverage
-                    logging.warning(f"DEM coverage missing for this area (all NaN values); filling with defaults")
-                    gdf["terrain_complexity"] = 0.5
-                    gdf["topographic_position"] = 0.5
+                    # City-specific raster has no coverage - try national fallback
+                    logging.warning(f"City-specific DEM has no coverage for this area; trying national fallback")
+
+        # If city-specific DEM failed or had no coverage, try national raster
+        if not dem_success:
+            national_dem_url = get_raster_url_from_vultr('dem', bounds, city=None)  # city=None forces national
+            if national_dem_url and national_dem_url != dem_url:  # Don't retry same URL
+                logging.info(f"Attempting national DEM fallback")
+                dem_values = sample_raster_at_points(national_dem_url, gdf_wgs84, buffer_meters=0.0)
+                if dem_values is not None and len(dem_values) == len(gdf):
+                    valid_dem = dem_values[~np.isnan(dem_values)]
+                    if len(valid_dem) > 0:
+                        logging.info(f"National DEM successful")
+                        gdf["terrain_complexity"] = calculate_terrain_complexity(dem_values, gdf_wgs84)
+                        gdf["topographic_position"] = calculate_topographic_position(dem_values)
+                        use_real_data = True
+                        dem_success = True
 
         # Fallback to defaults if real data unavailable
         if not use_real_data:
