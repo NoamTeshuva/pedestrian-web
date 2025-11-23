@@ -2754,39 +2754,48 @@ def predict_multi():
 
         # CRITICAL: Extract weather for each unique (season, time_of_day) combination
         # Weather varies by BOTH season AND time of day
-        from feature_engineering.weather_features import compute_weather_features
-        from datetime import datetime
+        try:
+            from feature_engineering.weather_features import compute_weather_features
+            from datetime import datetime
 
-        seasonal_weather = {}
-        unique_combinations = set((s, t) for s in seasons for t in times_of_day)
+            seasonal_weather = {}
+            unique_combinations = set((s, t) for s in seasons for t in times_of_day)
 
-        logging.info(f"Pre-fetching weather for {len(unique_combinations)} unique season/time combinations")
-        for season, time_of_day in unique_combinations:
-            # Create a timestamp for this season
-            season_ts = build_search_timestamp(season, "weekday", time_of_day)
+            logging.info(f"Pre-fetching weather for {len(unique_combinations)} unique season/time combinations")
+        except Exception as e:
+            logging.error(f"ERROR setting up weather pre-fetch: {e}", exc_info=True)
+            raise
 
-            # Create a temporary GeoDataFrame with temporal features for weather computation
-            temp_gdf = features_gdf.copy()
-            temp_gdf['Hour'] = season_ts.hour
-            temp_gdf['is_weekend'] = is_israeli_weekend(season_ts)
-            temp_gdf['time_of_day'] = time_of_day
+        try:
+            for season, time_of_day in unique_combinations:
+                # Create a timestamp for this season
+                season_ts = build_search_timestamp(season, "weekday", time_of_day)
 
-            # Extract weather for this season and time of day (averaged across 5 days and specific hours)
-            weather_gdf = compute_weather_features(
-                temp_gdf,
-                timestamp=season_ts,
-                time_of_day=time_of_day
-            )
-            # Store the weather columns in nested dict
-            if season not in seasonal_weather:
-                seasonal_weather[season] = {}
+                # Create a temporary GeoDataFrame with temporal features for weather computation
+                temp_gdf = features_gdf.copy()
+                temp_gdf['Hour'] = season_ts.hour
+                temp_gdf['is_weekend'] = is_israeli_weekend(season_ts)
+                temp_gdf['time_of_day'] = time_of_day
 
-            seasonal_weather[season][time_of_day] = {
-                'temperature': weather_gdf['temperature'].iloc[0] if len(weather_gdf) > 0 else 20.0,
-                'precipitation': weather_gdf['precipitation'].iloc[0] if len(weather_gdf) > 0 else 0.0,
-                'wind_speed': weather_gdf['wind_speed'].iloc[0] if len(weather_gdf) > 0 else 10.0
-            }
-            logging.info(f"Extracted {season}/{time_of_day} weather: {seasonal_weather[season][time_of_day]}")
+                # Extract weather for this season and time of day (averaged across 5 days and specific hours)
+                weather_gdf = compute_weather_features(
+                    temp_gdf,
+                    timestamp=season_ts,
+                    time_of_day=time_of_day
+                )
+                # Store the weather columns in nested dict
+                if season not in seasonal_weather:
+                    seasonal_weather[season] = {}
+
+                seasonal_weather[season][time_of_day] = {
+                    'temperature': weather_gdf['temperature'].iloc[0] if len(weather_gdf) > 0 else 20.0,
+                    'precipitation': weather_gdf['precipitation'].iloc[0] if len(weather_gdf) > 0 else 0.0,
+                    'wind_speed': weather_gdf['wind_speed'].iloc[0] if len(weather_gdf) > 0 else 10.0
+                }
+                logging.info(f"Extracted {season}/{time_of_day} weather: {seasonal_weather[season][time_of_day]}")
+        except Exception as e:
+            logging.error(f"ERROR in weather pre-fetch loop: {e}", exc_info=True)
+            raise
 
         # Start loading animation again for the prediction calculations
         start_loading_animation()
