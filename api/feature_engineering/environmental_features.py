@@ -224,6 +224,11 @@ def sample_raster_at_points(raster_url: str, gdf: gpd.GeoDataFrame, buffer_meter
                 # This captures roadside vegetation better than just center sampling
                 result_values = np.nanmax(values_reshaped, axis=1)
             else:
+                # No buffer: check for all-NaN before returning
+                if np.isnan(values_array).all():
+                    logging.warning("All sampled raster values are NaN (no coverage for this area)")
+                    return np.full(n_streets, np.nan)
+
                 # No buffer: just return center values directly
                 result_values = values_array
 
@@ -442,10 +447,18 @@ def compute_environmental_features(gdf: gpd.GeoDataFrame, city: Optional[str] = 
             # Use center sampling only for DEM (elevation doesn't need buffer)
             dem_values = sample_raster_at_points(dem_url, gdf_wgs84, buffer_meters=0.0)
             if dem_values is not None and len(dem_values) == len(gdf):
-                gdf["terrain_complexity"] = calculate_terrain_complexity(dem_values, gdf_wgs84)
-                gdf["topographic_position"] = calculate_topographic_position(dem_values)
-                use_real_data = True
-                logging.info(f"Extracted terrain features from DEM")
+                # Check if we have any valid DEM values
+                valid_dem = dem_values[~np.isnan(dem_values)]
+                if len(valid_dem) > 0:
+                    gdf["terrain_complexity"] = calculate_terrain_complexity(dem_values, gdf_wgs84)
+                    gdf["topographic_position"] = calculate_topographic_position(dem_values)
+                    use_real_data = True
+                    logging.info(f"Extracted terrain features from DEM")
+                else:
+                    # All DEM values are NaN - no coverage
+                    logging.warning(f"DEM coverage missing for this area (all NaN values); filling with defaults")
+                    gdf["terrain_complexity"] = 0.5
+                    gdf["topographic_position"] = 0.5
 
         # Fallback to defaults if real data unavailable
         if not use_real_data:
