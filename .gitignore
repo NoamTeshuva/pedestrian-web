@@ -151,3 +151,6 @@ nul
 temp_*.csv
 temp_*.gpkg
 temp_*.parquet
+# Disk cache for static features
+api/cache/features/*.gpkg
+api/cache/features/*_metadata.json

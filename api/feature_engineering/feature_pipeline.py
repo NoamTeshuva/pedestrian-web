@@ -56,6 +56,7 @@ from .weather_features import (
     compute_weather_features,
     WeatherError
 )
+from .disk_cache import get_disk_cache
 
 # Import city name resolver for per-city optimization
 try:
@@ -735,26 +736,24 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
 
 
 # =========================
-# Cached Pipeline Wrapper
+# Cached Pipeline Wrapper with Disk Cache
 # =========================
 
-# IMPORTANT: @lru_cache is PER-PROCESS and will NOT share cache between Gunicorn workers.
-# If running with --workers 2 or more, each worker has its own separate cache.
-# Options:
-#   1. Run with --workers 1 for in-memory caching to work across endpoints
-#   2. Use persistent cache (file/DB/Redis) for multi-worker deployments
+# DISK CACHE: Works across multiple Gunicorn workers by storing cache on disk.
+# This solves the multi-worker problem where each process has its own memory space.
 
-@lru_cache(maxsize=64)
 def run_static_feature_pipeline_cached(
     place: Optional[str],
     bbox_key: Optional[Tuple[float, float, float, float]]
 ) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
     """
-    Cached wrapper for run_static_feature_pipeline.
+    Disk-cached wrapper for run_static_feature_pipeline.
 
     Cache key: (place, bbox) only - NO timestamp!
     This allows perfect cache reuse between /predict-multi and /predict-gpkg
     since static features don't change with time.
+
+    Uses disk-based cache that works across multiple Gunicorn workers.
 
     Args:
         place: Place name (e.g., "Monaco", "Tel Aviv")
@@ -766,11 +765,24 @@ def run_static_feature_pipeline_cached(
     Note:
         Returns features WITHOUT temporal/weather. Endpoints must add those separately.
     """
-    # Call the static pipeline (no timestamp parameter)
-    return run_static_feature_pipeline(
+    # Try disk cache first
+    disk_cache = get_disk_cache()
+    cached_result = disk_cache.get(place, bbox_key)
+
+    if cached_result is not None:
+        # Cache hit - return copy to avoid modification
+        return cached_result[0].copy(), cached_result[1]
+
+    # Cache miss - compute features
+    features_gdf, metadata = run_static_feature_pipeline(
         place=place,
         bbox=bbox_key
     )
+
+    # Store in disk cache
+    disk_cache.set(place, bbox_key, features_gdf, metadata)
+
+    return features_gdf, metadata
 
 # LEGACY: Old cached function with timestamp - kept for backward compatibility
 @lru_cache(maxsize=64)
@@ -808,12 +820,14 @@ def run_static_feature_pipeline_cached_normalized(
     bbox: Optional[Tuple[float, float, float, float]] = None
 ) -> Tuple[gpd.GeoDataFrame, Dict[str, Any]]:
     """
-    Normalized wrapper for cached STATIC feature pipeline.
+    Normalized wrapper for cached STATIC feature pipeline with disk cache.
 
     This returns features WITHOUT temporal/weather. Endpoints must add those separately.
 
     Cache key: (place, bbox) only - NO timestamp!
     Perfect cache reuse between endpoints for the same location.
+
+    Uses disk-based cache that works across multiple Gunicorn workers.
 
     Args:
         place: Place name (e.g., "Monaco", "Tel Aviv")
@@ -835,17 +849,13 @@ def run_static_feature_pipeline_cached_normalized(
 
     # DEBUG: Log cache key and process info BEFORE calling cached function
     pid = os.getpid()
-    logging.info(f"[STATIC CACHE DEBUG] PID={pid} | Cache key: place={place}, bbox_key={bbox_key}")
+    logging.info(f"[DISK CACHE DEBUG] PID={pid} | Checking cache: place={place}, bbox_key={bbox_key}")
 
     # Call cached wrapper with hashable arguments (NO TIMESTAMP!)
     features_gdf, metadata = run_static_feature_pipeline_cached(
         place=place,
         bbox_key=bbox_key
     )
-
-    # DEBUG: Log cache statistics AFTER calling cached function
-    cache_info = run_static_feature_pipeline_cached.cache_info()
-    logging.info(f"[STATIC CACHE DEBUG] PID={pid} | Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, size={cache_info.currsize}/{cache_info.maxsize}")
 
     # CRITICAL: Return a COPY of the GeoDataFrame
     # Each endpoint modifies temporal features (Hour, is_weekend, etc.)

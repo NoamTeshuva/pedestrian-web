@@ -150,11 +150,25 @@ def get_landuse_polygons(place: Optional[str] = None,
                 city_landuse_path = f"data/processed/israel/cities/{city}/{city}_landuse.gpkg"
                 if storage.file_exists(city_landuse_path):
                     logging.info(f"Loading precomputed landuse for {city} from Vultr")
-                    # Download to temp file and load
+                    # Download to temp file
                     temp_file = LandUseConfig.get_temp_dir() / f"{city}_landuse_vultr.gpkg"
-                    storage.download_file(city_landuse_path, str(temp_file))
-                    # Convert Path to string for Fiona compatibility
-                    landuse = gpd.read_file(str(temp_file))
+                    temp_file_str = str(temp_file)
+
+                    # Download and validate
+                    storage.download_file(city_landuse_path, temp_file_str)
+
+                    # Verify file exists and has content before trying to read
+                    if not os.path.exists(temp_file_str):
+                        raise FileNotFoundError(f"Download failed: {temp_file_str} does not exist")
+
+                    file_size = os.path.getsize(temp_file_str)
+                    if file_size == 0:
+                        raise ValueError(f"Downloaded file is empty: {temp_file_str}")
+
+                    logging.info(f"Downloaded {file_size} bytes, reading with GeoPandas")
+
+                    # Read with explicit string path for Fiona compatibility
+                    landuse = gpd.read_file(temp_file_str)
                     logging.info(f"Loaded {len(landuse)} landuse polygons from precomputed file")
                     return landuse
                 else:
