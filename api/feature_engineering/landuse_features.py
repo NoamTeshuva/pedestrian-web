@@ -153,7 +153,8 @@ def get_landuse_polygons(place: Optional[str] = None,
                     # Download to temp file and load
                     temp_file = LandUseConfig.get_temp_dir() / f"{city}_landuse_vultr.gpkg"
                     storage.download_file(city_landuse_path, str(temp_file))
-                    landuse = gpd.read_file(temp_file)
+                    # Convert Path to string for Fiona compatibility
+                    landuse = gpd.read_file(str(temp_file))
                     logging.info(f"Loaded {len(landuse)} landuse polygons from precomputed file")
                     return landuse
                 else:
