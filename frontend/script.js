@@ -1320,10 +1320,10 @@ class PedestrianPredictionApp {
 					<!-- Network Metrics -->
 					<div style="font-size: 0.85em; color: #666; margin-top: 8px;">
 						<p style="margin: 2px 0; font-weight: bold; color: #333;">מדדי רשת:</p>
-						<p style="margin: 3px 0; padding-right: 10px;"><strong>Betweenness:</strong> ${this.formatProb(
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>Betweenness:</strong> ${this.formatCentrality(
 							props.edge_betweenness ?? props.betweenness
 						)}</p>
-						<p style="margin: 3px 0; padding-right: 10px;"><strong>Closeness:</strong> ${this.formatProb(
+						<p style="margin: 3px 0; padding-right: 10px;"><strong>Closeness:</strong> ${this.formatCentrality(
 							props.edge_closeness ?? props.closeness
 						)}</p>
 					</div>
@@ -1413,6 +1413,14 @@ class PedestrianPredictionApp {
 	formatTemp(val) {
 		const n = Number(val);
 		return Number.isFinite(n) ? `${n.toFixed(1)}°C` : "לא ידוע";
+	}
+
+	formatCentrality(val) {
+		// Normalize centrality from 0-1 to 1-100 scale and round
+		const n = Number(val);
+		if (!Number.isFinite(n)) return "לא ידוע";
+		const normalized = Math.round(n * 99 + 1); // Map 0-1 to 1-100
+		return normalized.toString();
 	}
 
 	formatPrecip(val) {
