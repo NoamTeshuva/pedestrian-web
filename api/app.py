@@ -88,6 +88,9 @@ from feature_engineering.feature_pipeline import (
     PipelineConfig
 )
 
+# Import authentication utilities
+from auth import authenticate_user, get_user_info, require_auth
+
 # Import OSM tiles helper for ArcGIS integration
 try:
     from osm_tiles import edges_for_bbox, edges_from_place
@@ -1146,6 +1149,93 @@ def _build_predictions_gdf(predictions: dict, place: str = None) -> gpd.GeoDataF
     
     return gdf
 
+
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    """
+    Authenticate user with username and password.
+
+    Request body:
+    {
+        "username": "user1",
+        "password": "pedestrian2024"
+    }
+
+    Response:
+    {
+        "success": true,
+        "user": {
+            "username": "user1",
+            "full_name": "אור לילוז",
+            "role": "student",
+            "user_id": 1,
+            "active": true
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        username = data.get("username")
+        password = data.get("password")
+
+        if not username or not password:
+            return jsonify({"error": "username and password are required"}), 400
+
+        # Authenticate user
+        if not authenticate_user(username, password):
+            return jsonify({"error": "Invalid credentials"}), 401
+
+        # Get user info (without password hash)
+        user_info = get_user_info(username)
+        if not user_info:
+            return jsonify({"error": "User not found"}), 404
+
+        return jsonify({"success": True, "user": user_info})
+
+    except Exception as e:
+        logging.error(f"Error in /api/login: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/user", methods=["GET"])
+@require_auth
+def get_current_user():
+    """
+    Get current authenticated user's information.
+    Requires authentication via Basic Auth or JSON body credentials.
+
+    Response:
+    {
+        "username": "user1",
+        "full_name": "אור לילוז",
+        "role": "student",
+        "user_id": 1,
+        "active": true
+    }
+    """
+    try:
+        # request.auth_username is set by @require_auth decorator
+        user_info = get_user_info(request.auth_username)
+        if not user_info:
+            return jsonify({"error": "User not found"}), 404
+
+        return jsonify(user_info)
+
+    except Exception as e:
+        logging.error(f"Error in /api/user: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# NETWORK AND PREDICTION ENDPOINTS
+# ============================================================================
 
 @app.route("/base-network", methods=["GET"])
 def base_network():
