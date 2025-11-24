@@ -101,7 +101,9 @@ try:
         validate_country
     )
     CACHE_ENABLED = True
+    print("[CACHE] Cache module imported successfully - caching ENABLED")
 except Exception as cache_import_error:
+    print(f"[CACHE] Failed to import cache module: {cache_import_error}")
     logging.warning(f"[CACHE] Failed to import cache module: {cache_import_error}")
     CACHE_ENABLED = False
 
@@ -2963,6 +2965,9 @@ def predict_multi():
                     # ========== CACHE CHECK (FAST PATH) ==========
                     cached_geojson = None
                     cache_hit = False
+
+                    # Debug: Show cache status
+                    print(f"[CACHE DEBUG] Layer {layer_name}: CACHE_ENABLED={CACHE_ENABLED}, place={place}, bbox={bbox is not None}")
 
                     if CACHE_ENABLED and place and bbox:
                         try:
