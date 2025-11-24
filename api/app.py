@@ -2891,6 +2891,15 @@ def predict_multi():
         if features_gdf is None or len(features_gdf) == 0:
             return jsonify({"layers": [], "place": place, "bbox": bbox}), 200
 
+        # Extract bbox from GeoDataFrame for cache key (if not provided explicitly)
+        if bbox is None and place and len(features_gdf) > 0:
+            try:
+                bounds = features_gdf.total_bounds  # [minx, miny, maxx, maxy]
+                bbox = tuple(bounds)
+                logging.info(f"[CACHE] Extracted bbox from features for {place}: {bbox}")
+            except Exception as e:
+                logging.warning(f"[CACHE] Could not extract bbox from features: {e}")
+
         # Initialize GPKG file if requested
         gpkg_path = None
         gpkg_filename = None
