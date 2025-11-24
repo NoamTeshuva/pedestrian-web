@@ -2783,6 +2783,35 @@ def save_layers_to_gpkg(layers, filename=None):
     return str(tmp_path)
 
 
+@app.route("/download-gpkg/<filename>", methods=["GET"])
+def download_gpkg(filename):
+    """Download a GPKG file created during predict-multi."""
+    try:
+        from pathlib import Path
+        import os
+
+        # Security: only allow safe filenames (no path traversal)
+        if not filename.endswith('.gpkg') or '/' in filename or '\\' in filename:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        gpkg_path = Path(tempfile.gettempdir()) / filename
+
+        if not gpkg_path.exists():
+            return jsonify({"error": "File not found"}), 404
+
+        logging.info(f"[DOWNLOAD] Serving GPKG file: {filename}")
+        return send_file(
+            str(gpkg_path),
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/geopackage+sqlite3'
+        )
+
+    except Exception as e:
+        logging.error(f"Error downloading GPKG: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/predict-multi", methods=["GET"])
 def predict_multi():
     """
@@ -2794,9 +2823,10 @@ def predict_multi():
       - week_types: csv of values in {weekday,weekend}
       - times_of_day: csv of values in {morning,afternoon,evening,night}
       - include_average: boolean to include average layer (default: true)
+      - create_gpkg: boolean to create GPKG file during processing (default: false)
 
     Returns:
-      { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox }
+      { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox, gpkg_url (if requested) }
     """
     try:
         place = request.args.get("place")
@@ -2812,6 +2842,7 @@ def predict_multi():
         week_types = _parse_csv(request.args.get("week_types"), ["weekday", "weekend"])
         times_of_day = _parse_csv(request.args.get("times_of_day"), ["morning", "afternoon", "evening", "night"])
         include_average = request.args.get("include_average", "true").lower() == "true"
+        create_gpkg = request.args.get("create_gpkg", "false").lower() == "true"
 
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
@@ -2844,6 +2875,16 @@ def predict_multi():
 
         if features_gdf is None or len(features_gdf) == 0:
             return jsonify({"layers": [], "place": place, "bbox": bbox}), 200
+
+        # Initialize GPKG file if requested
+        gpkg_path = None
+        gpkg_filename = None
+        if create_gpkg:
+            import uuid
+            from pathlib import Path
+            gpkg_filename = f"{place or 'bbox'}_{uuid.uuid4().hex[:8]}.gpkg"
+            gpkg_path = Path(tempfile.gettempdir()) / gpkg_filename
+            logging.info(f"[GPKG] Creating GPKG file during predict-multi: {gpkg_path}")
 
         # CRITICAL: Extract weather for each unique (season, time_of_day) combination
         # Weather varies by BOTH season AND time of day
@@ -2963,6 +3004,16 @@ def predict_multi():
                     if 'wind_speed' in gdf_out.columns:
                         weather_metadata['wind_speed'] = float(gdf_out['wind_speed'].mean())
 
+                    # Write to GPKG if requested
+                    if create_gpkg and gpkg_path:
+                        try:
+                            # Write this layer to GPKG (mode='a' to append after first layer)
+                            write_mode = 'w' if not gpkg_path.exists() else 'a'
+                            gdf_out.to_file(gpkg_path, layer=layer_name, driver='GPKG', mode=write_mode)
+                            logging.info(f"[GPKG] Written layer '{layer_name}' to {gpkg_path}")
+                        except Exception as e:
+                            logging.error(f"[GPKG] Error writing layer '{layer_name}': {e}")
+
                     layers.append({
                         "name": layer_name,
                         "geojson": clean_data,
@@ -2973,7 +3024,7 @@ def predict_multi():
                         "week_type": week_type,
                         "time_of_day": tod,
                     })
-                    
+
                     current_step += 1
 
         # Calculate average layer if requested and we have multiple layers
@@ -2981,6 +3032,15 @@ def predict_multi():
             update_progress("calculating_average", current_step, total_steps, "מחשב שכבה ממוצעת")
             average_layer = calculate_average_layer(layers)
             if average_layer:
+                # Write average layer to GPKG if requested
+                if create_gpkg and gpkg_path and 'geojson' in average_layer:
+                    try:
+                        avg_gdf = gpd.GeoDataFrame.from_features(average_layer['geojson']['features'])
+                        avg_gdf.to_file(gpkg_path, layer='average', driver='GPKG', mode='a')
+                        logging.info(f"[GPKG] Written average layer to {gpkg_path}")
+                    except Exception as e:
+                        logging.error(f"[GPKG] Error writing average layer: {e}")
+
                 layers.insert(0, average_layer)  # Add average layer at the beginning
                 logging.info(f"Added average layer with {average_layer['feature_count']} features")
             else:
@@ -2994,12 +3054,24 @@ def predict_multi():
         layer_names = [layer.get('name', 'unknown') for layer in layers]
         logging.info(f"Returning {len(layers)} layers: {layer_names}")
 
-        return json_response({
+        # Prepare response
+        response_data = {
             "layers": layers,
             "place": place,
             "bbox": bbox,
             "total_layers": len(layers)
-        })
+        }
+
+        # Add GPKG download URL if file was created
+        if create_gpkg and gpkg_path and gpkg_path.exists():
+            response_data["gpkg_available"] = True
+            response_data["gpkg_filename"] = gpkg_filename
+            response_data["gpkg_download_url"] = f"/download-gpkg/{gpkg_filename}"
+            logging.info(f"[GPKG] File ready for download: {gpkg_filename}")
+        else:
+            response_data["gpkg_available"] = False
+
+        return json_response(response_data)
 
     except Exception as e:
         import traceback
