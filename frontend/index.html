@@ -5,12 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>חיזוי נפח הולכי רגל</title>
     <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
             integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <!-- Leaflet Draw CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
     <!-- Custom CSS -->
     <link rel="stylesheet" href="styles.css">
+
+    <!-- LogRocket -->
+    <script src="https://cdn.lr-in-prod.com/LogRocket.min.js" crossorigin="anonymous"></script>
+    <script>
+        window.LogRocket && window.LogRocket.init('b3nwmk/pedestrian');
+    </script>
 </head>
 <body>
     <!-- Full screen map -->
@@ -250,6 +256,17 @@
                         localStorage.setItem('currentUser', JSON.stringify(data.user));
                         localStorage.setItem('username', username);
 
+                        // Identify user in LogRocket
+                        if (window.LogRocket) {
+                            window.LogRocket.identify(data.user.username, {
+                                name: data.user.full_name,
+                                email: data.user.username + '@pedestrian.app',
+                                role: data.user.role,
+                                user_id: data.user.user_id
+                            });
+                            console.log('[LOGROCKET] User identified:', data.user.username);
+                        }
+
                         // Display user info
                         userFullName.textContent = data.user.full_name || data.user.username;
                         const roleText = data.user.role === 'admin' ? 'מנהל' : 'סטודנט';
@@ -321,6 +338,17 @@
                     try {
                         const currentUser = JSON.parse(currentUserStr);
                         window.CURRENT_USER = currentUser;
+
+                        // Identify user in LogRocket if already logged in
+                        if (window.LogRocket) {
+                            window.LogRocket.identify(currentUser.username, {
+                                name: currentUser.full_name,
+                                email: currentUser.username + '@pedestrian.app',
+                                role: currentUser.role,
+                                user_id: currentUser.user_id
+                            });
+                            console.log('[LOGROCKET] User identified from cache:', currentUser.username);
+                        }
 
                         userFullName.textContent = currentUser.full_name || currentUser.username;
                         const roleText = currentUser.role === 'admin' ? 'מנהל' : 'סטודנט';
