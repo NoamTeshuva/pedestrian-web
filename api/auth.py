@@ -32,10 +32,10 @@ def hash_password(password: str) -> str:
 
 def authenticate_user(username: str, password: str) -> bool:
     """
-    Authenticate a user with username and password.
+    Authenticate a user with username or full name and password.
 
     Args:
-        username: Username to authenticate
+        username: Username (e.g. 'user1') or full name (e.g. 'אור לילוז') to authenticate
         password: Plain text password
 
     Returns:
@@ -43,18 +43,31 @@ def authenticate_user(username: str, password: str) -> bool:
     """
     users = load_users()
 
-    if username not in users:
-        return False
+    # Try to find user by username first
+    if username in users:
+        user = users[username]
 
-    user = users[username]
+        # Check if user is active
+        if not user.get('active', True):
+            return False
 
-    # Check if user is active
-    if not user.get('active', True):
-        return False
+        # Verify password hash
+        password_hash = hash_password(password)
+        return password_hash == user['password_hash']
 
-    # Verify password hash
-    password_hash = hash_password(password)
-    return password_hash == user['password_hash']
+    # If not found by username, try to find by full_name
+    for user_key, user_data in users.items():
+        if user_data.get('full_name') == username:
+            # Check if user is active
+            if not user_data.get('active', True):
+                return False
+
+            # Verify password hash
+            password_hash = hash_password(password)
+            return password_hash == user_data['password_hash']
+
+    # User not found
+    return False
 
 
 def get_user_info(username: str) -> Optional[Dict[str, Any]]:
@@ -62,20 +75,29 @@ def get_user_info(username: str) -> Optional[Dict[str, Any]]:
     Get user information (without password hash).
 
     Args:
-        username: Username to look up
+        username: Username (e.g. 'user1') or full name (e.g. 'אור לילוז') to look up
 
     Returns:
         User info dict or None if not found
     """
     users = load_users()
 
-    if username not in users:
-        return None
+    # Try to find user by username first
+    if username in users:
+        user = users[username].copy()
+        user.pop('password_hash', None)  # Never return password hash
+        user['username'] = username
+        return user
 
-    user = users[username].copy()
-    user.pop('password_hash', None)  # Never return password hash
-    user['username'] = username
-    return user
+    # If not found by username, try to find by full_name
+    for user_key, user_data in users.items():
+        if user_data.get('full_name') == username:
+            user = user_data.copy()
+            user.pop('password_hash', None)  # Never return password hash
+            user['username'] = user_key  # Return the actual username (user1, user2, etc.)
+            return user
+
+    return None
 
 
 def require_auth(f):
