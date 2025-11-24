@@ -746,12 +746,12 @@ def _prepare_gdf_for_cache(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Prepare GeoDataFrame for Parquet serialization by normalizing problematic columns.
 
-    The main issue is osmid, which can be:
-    - A single int/string
-    - A list of ints (for merged edges)
-    - A tuple of ints
+    Issues with OSMnx data:
+    - osmid: can be int, list of ints, or tuple
+    - reversed: can be bool or list of bools
+    - Other columns may also have mixed types
 
-    Parquet doesn't handle mixed types well, so we convert osmid to a consistent string format.
+    Parquet doesn't handle mixed types well, so we convert to consistent string format.
 
     Args:
         gdf: GeoDataFrame to prepare
@@ -766,13 +766,36 @@ def _prepare_gdf_for_cache(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         def serialize_osmid(v):
             """Convert osmid to string format, handling lists/tuples."""
             if isinstance(v, (list, tuple)):
-                # Multiple osmids (merged edges) - join with comma
                 return ",".join(map(str, v)) if v else None
-            # Single osmid - convert to string
             return str(v) if v is not None else None
 
         gdf_clean['osmid'] = gdf_clean['osmid'].apply(serialize_osmid)
-        logging.debug(f"[CACHE PREP] Normalized osmid column for {len(gdf_clean)} features")
+        logging.debug(f"[CACHE PREP] Normalized osmid column")
+
+    # Normalize reversed column if present
+    if 'reversed' in gdf_clean.columns:
+        def serialize_reversed(v):
+            """Convert reversed to string format, handling lists."""
+            if isinstance(v, (list, tuple)):
+                return ",".join(map(str, v)) if v else None
+            return str(v) if v is not None else None
+
+        gdf_clean['reversed'] = gdf_clean['reversed'].apply(serialize_reversed)
+        logging.debug(f"[CACHE PREP] Normalized reversed column")
+
+    # Normalize any other list/tuple columns
+    for col in gdf_clean.columns:
+        if col not in ['geometry', 'osmid', 'reversed']:
+            # Check if column has any list/tuple values
+            sample = gdf_clean[col].iloc[0] if len(gdf_clean) > 0 else None
+            if isinstance(sample, (list, tuple)):
+                def serialize_list(v):
+                    if isinstance(v, (list, tuple)):
+                        return ",".join(map(str, v)) if v else None
+                    return str(v) if v is not None else None
+
+                gdf_clean[col] = gdf_clean[col].apply(serialize_list)
+                logging.debug(f"[CACHE PREP] Normalized {col} column")
 
     return gdf_clean
 
