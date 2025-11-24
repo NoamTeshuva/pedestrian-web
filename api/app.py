@@ -1625,27 +1625,6 @@ def predict_all():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/download-gpkg", methods=["GET"])
-def download_gpkg():
-    """
-    Download the last generated GPKG file.
-    Requires ?path=<gpkg_path> as query param.
-    """
-    try:
-        path = request.args.get("path")
-        if not path or not os.path.exists(path):
-            return jsonify({"error": "Invalid or missing GPKG path"}), 400
-
-        return send_file(
-            path,
-            mimetype="application/geopackage+sqlite3",
-            as_attachment=True,
-            download_name=os.path.basename(path),
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/predict-gpkg", methods=["GET"])
 def predict_gpkg():
     """Get pedestrian volume predictions as downloadable GPKG file - predictions only.
