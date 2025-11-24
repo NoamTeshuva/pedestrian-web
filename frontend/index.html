@@ -16,16 +16,28 @@
     <!-- Full screen map -->
     <div id="map" class="fullscreen-map"></div>
 
-    <!-- Small Login Popup (upper left) -->
+    <!-- Login Popup (centered) -->
     <div class="login-popup" id="loginPopup">
         <div class="login-popup-content">
-            <h3>התחברות</h3>
-            <input
-                type="text"
-                id="loginUsername"
-                placeholder="שם משתמש (user1, user2...)"
-                autocomplete="username"
-            />
+            <h3>התחברות למערכת</h3>
+            <div class="form-field">
+                <label for="loginUsername">שם משתמש:</label>
+                <input
+                    type="text"
+                    id="loginUsername"
+                    placeholder="user1, user2..."
+                    autocomplete="username"
+                />
+            </div>
+            <div class="form-field">
+                <label for="loginPassword">סיסמה:</label>
+                <input
+                    type="password"
+                    id="loginPassword"
+                    placeholder="הזן סיסמה"
+                    autocomplete="current-password"
+                />
+            </div>
             <button id="loginSubmitBtn" class="login-submit-btn">כניסה</button>
             <div id="loginError" class="login-error hidden"></div>
         </div>
@@ -178,14 +190,13 @@
     <!-- Authentication Check and Login Popup -->
     <script>
         (function () {
-            const DEFAULT_PASSWORD = 'pedestrian2024';
-
             // Check if user is logged in
             const currentUserStr = localStorage.getItem('currentUser');
 
             document.addEventListener('DOMContentLoaded', function() {
                 const loginPopup = document.getElementById('loginPopup');
                 const loginUsername = document.getElementById('loginUsername');
+                const loginPassword = document.getElementById('loginPassword');
                 const loginSubmitBtn = document.getElementById('loginSubmitBtn');
                 const loginError = document.getElementById('loginError');
                 const userInfoBar = document.getElementById('userInfoBar');
@@ -213,10 +224,10 @@
                     loginError.classList.add('hidden');
                 }
 
-                async function performLogin(username) {
+                async function performLogin(username, password) {
                     hideError();
                     loginSubmitBtn.disabled = true;
-                    loginSubmitBtn.textContent = '...';
+                    loginSubmitBtn.textContent = 'מתחבר...';
 
                     try {
                         const response = await fetch(`${window.API_BASE}/api/login`, {
@@ -224,7 +235,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 username: username,
-                                password: DEFAULT_PASSWORD
+                                password: password
                             })
                         });
 
@@ -245,12 +256,15 @@
                         userRoleBadge.textContent = roleText;
                         userRoleBadge.className = `user-role-badge role-${data.user.role}`;
 
+                        // Clear password field
+                        loginPassword.value = '';
+
                         hideLogin();
                         console.log('[AUTH] Logged in as:', data.user.username, `(${data.user.full_name})`);
 
                     } catch (error) {
                         console.error('Login error:', error);
-                        showError(error.message || 'שם משתמש שגוי');
+                        showError(error.message || 'שם משתמש או סיסמה שגויים');
                     } finally {
                         loginSubmitBtn.disabled = false;
                         loginSubmitBtn.textContent = 'כניסה';
@@ -260,17 +274,31 @@
                 // Login button click
                 loginSubmitBtn.addEventListener('click', function() {
                     const username = loginUsername.value.trim();
+                    const password = loginPassword.value;
+
                     if (!username) {
                         showError('נא להזין שם משתמש');
                         return;
                     }
-                    performLogin(username);
+                    if (!password) {
+                        showError('נא להזין סיסמה');
+                        return;
+                    }
+
+                    performLogin(username, password);
+                });
+
+                // Enter key in password field
+                loginPassword.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        loginSubmitBtn.click();
+                    }
                 });
 
                 // Enter key in username field
                 loginUsername.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
-                        loginSubmitBtn.click();
+                        loginPassword.focus();
                     }
                 });
 
@@ -282,6 +310,7 @@
                             localStorage.removeItem('username');
                             window.CURRENT_USER = null;
                             loginUsername.value = '';
+                            loginPassword.value = '';
                             showLogin();
                         }
                     });

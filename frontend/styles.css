@@ -701,17 +701,19 @@ body {
     box-shadow: none !important;
 }
 
-/* Small Login Popup (upper left corner) */
+/* Login Popup (centered) */
 .login-popup {
     position: fixed;
-    top: 20px;
-    left: 20px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     z-index: 2000;
     background: white;
-    border-radius: 10px;
-    padding: 15px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-    min-width: 220px;
+    border-radius: 15px;
+    padding: 30px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    min-width: 350px;
+    max-width: 400px;
 }
 
 .login-popup.hidden {
@@ -719,57 +721,86 @@ body {
 }
 
 .login-popup-content h3 {
-    margin: 0 0 10px 0;
-    font-size: 16px;
+    margin: 0 0 20px 0;
+    font-size: 22px;
     color: #333;
     text-align: center;
+    font-weight: 600;
+}
+
+.login-popup-content .form-field {
+    margin-bottom: 15px;
+}
+
+.login-popup-content .form-field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 14px;
+    color: #555;
+    font-weight: 500;
 }
 
 .login-popup-content input {
     width: 100%;
-    padding: 8px;
+    padding: 12px;
     border: 2px solid #ddd;
-    border-radius: 5px;
-    font-size: 14px;
-    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 15px;
+    transition: border-color 0.3s;
+    box-sizing: border-box;
+}
+
+.login-popup-content input[type="text"] {
+    direction: ltr;
+    text-align: left;
+}
+
+.login-popup-content input[type="password"] {
     direction: ltr;
     text-align: left;
 }
 
 .login-popup-content input:focus {
     outline: none;
-    border-color: #4CAF50;
+    border-color: #667eea;
 }
 
 .login-submit-btn {
     width: 100%;
-    padding: 8px;
-    background: #4CAF50;
+    padding: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
-    border-radius: 5px;
-    font-size: 14px;
+    border-radius: 8px;
+    font-size: 16px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin-top: 10px;
 }
 
 .login-submit-btn:hover {
-    background: #45a049;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.login-submit-btn:active {
+    transform: translateY(0);
 }
 
 .login-submit-btn:disabled {
-    background: #ccc;
+    opacity: 0.6;
     cursor: not-allowed;
+    transform: none;
 }
 
 .login-error {
-    margin-top: 8px;
-    padding: 6px;
+    margin-top: 12px;
+    padding: 10px;
     background: #ffebee;
     color: #c62828;
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: 6px;
+    font-size: 13px;
     text-align: center;
 }
 
