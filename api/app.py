@@ -91,6 +91,20 @@ from feature_engineering.feature_pipeline import (
 # Import authentication utilities
 from auth import authenticate_user, get_user_info, require_auth
 
+# Import caching utilities
+try:
+    from cache.vultr_cache import (
+        build_cache_key,
+        cache_exists,
+        load_cached_geojson,
+        save_cached_geojson,
+        validate_country
+    )
+    CACHE_ENABLED = True
+except Exception as cache_import_error:
+    logging.warning(f"[CACHE] Failed to import cache module: {cache_import_error}")
+    CACHE_ENABLED = False
+
 # Import OSM tiles helper for ArcGIS integration
 try:
     from osm_tiles import edges_for_bbox, edges_from_place
@@ -2796,8 +2810,14 @@ def predict_multi():
     """
     Compute predictions for multiple time combinations in ONE pipeline run.
 
+    CACHING: Results are cached in Vultr Object Storage with gzip compression.
+    Cache key includes: country, city, season, weekend flag, time of day, bbox.
+    Fast path: Returns cached results if available (~100ms).
+    Slow path: Runs model pipeline and caches result for future use.
+
     Query params:
       - place or bbox (like /predict)
+      - country: country name (default: israel) - ONLY "israel" is supported
       - seasons: csv of values in {winter,spring,summer,autumn}
       - week_types: csv of values in {weekday,weekend}
       - times_of_day: csv of values in {morning,afternoon,evening,night}
@@ -2806,6 +2826,9 @@ def predict_multi():
 
     Returns:
       { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox, gpkg_url (if requested) }
+
+    Errors:
+      400: Country not supported (only israel is allowed)
     """
     try:
         place = request.args.get("place")
@@ -2822,6 +2845,17 @@ def predict_multi():
         times_of_day = _parse_csv(request.args.get("times_of_day"), ["morning", "afternoon", "evening", "night"])
         include_average = request.args.get("include_average", "true").lower() == "true"
         create_gpkg = request.args.get("create_gpkg", "false").lower() == "true"
+
+        # Get country parameter (default to israel)
+        country = request.args.get("country", "israel").lower()
+
+        # CRITICAL: Israel-only validation for caching
+        if CACHE_ENABLED and not validate_country(country):
+            return jsonify({
+                "error": "Country not supported",
+                "message": f"Only 'israel' is supported. Received: {country}",
+                "supported_countries": ["israel"]
+            }), 400
 
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
@@ -2921,71 +2955,145 @@ def predict_multi():
             for week_type in week_types:
                 for tod in times_of_day:
                     # Update progress
-                    update_progress("predicting", current_step, total_steps, 
+                    update_progress("predicting", current_step, total_steps,
                                   f"מנבא עבור {season} - {week_type} - {tod}")
-                    
-                    # override time-based features on a copy
-                    gdf = features_gdf.copy()
-                    sp = parse_search_parameters({
-                        "season": season,
-                        "week_type": week_type,
-                        "time_of_day": tod,
-                    })
-                    gdf['Hour'] = sp['features']['Hour']
-                    gdf['Month'] = sp['features']['Month']
-                    gdf['DayOfWeek'] = sp['features']['DayOfWeek']
-                    gdf['is_weekend'] = sp['features']['is_weekend']
-                    gdf['time_of_day'] = sp['features']['time_of_day']
-
-                    # CRITICAL: Apply season AND time-of-day specific weather data
-                    weather_data = seasonal_weather.get(season, {}).get(tod, {})
-                    gdf['temperature'] = weather_data.get('temperature', 20.0)
-                    gdf['precipitation'] = weather_data.get('precipitation', 0.0)
-                    gdf['wind_speed'] = weather_data.get('wind_speed', 10.0)
-
-                    # prepare and predict
-                    model_features = prepare_model_features(gdf)
-                    # Ensure categorical as strings
-                    for col in CAT_COLS:
-                        if col in model_features.columns:
-                            model_features[col] = model_features[col].astype(str)
-                    cat_feature_indices = [model_features.columns.get_loc(col) for col in CAT_COLS if col in model_features.columns]
-                    pool = Pool(model_features, cat_features=cat_feature_indices)
-
-                    y_pred = model.predict(pool)
-                    y_proba = model.predict_proba(pool)
-
-                    gdf_out = gdf.copy()
-                    # Convert model classes (0-4) to user-facing classes (1-5)
-                    gdf_out["volume_class"] = (y_pred.astype(int) + 1).astype(int)
-                    # add probabilities
-                    if hasattr(y_proba, 'ndim') and y_proba.ndim > 1:
-                        for i in range(y_proba.shape[1]):
-                            gdf_out[f"proba_{i+1}"] = y_proba[:, i]
-                        try:
-                            import numpy as _np
-                            gdf_out['proba_top'] = _np.asarray(y_proba).max(axis=1)
-                        except Exception:
-                            pass
-                    else:
-                        gdf_out['proba_1'] = y_proba
 
                     layer_name = f"{season}_{week_type}_{tod}"
-                    # serialize to clean GeoJSON
-                    clean_data = clean_geojson(gdf_out.__geo_interface__)
 
-                    # Extract weather metadata (average across all streets in this layer)
-                    weather_metadata = {}
-                    if 'temperature' in gdf_out.columns:
-                        weather_metadata['temperature'] = float(gdf_out['temperature'].mean())
-                    if 'precipitation' in gdf_out.columns:
-                        weather_metadata['precipitation'] = float(gdf_out['precipitation'].mean())
-                    if 'wind_speed' in gdf_out.columns:
-                        weather_metadata['wind_speed'] = float(gdf_out['wind_speed'].mean())
+                    # ========== CACHE CHECK (FAST PATH) ==========
+                    cached_geojson = None
+                    cache_hit = False
 
-                    # Write to GPKG if requested
+                    if CACHE_ENABLED and place and bbox:
+                        try:
+                            # Build cache key
+                            is_weekend = (week_type == "weekend")
+                            cache_key = build_cache_key(
+                                country=country,
+                                city=place,
+                                season=season,
+                                is_weekend=is_weekend,
+                                time_of_day=tod,
+                                bbox=bbox
+                            )
+
+                            # Check if cache exists
+                            if cache_exists(cache_key):
+                                # Load cached GeoJSON
+                                cached_geojson = load_cached_geojson(cache_key)
+                                if cached_geojson:
+                                    cache_hit = True
+                                    logging.info(f"[CACHE HIT] Loaded {layer_name} from cache: {cache_key}")
+                        except Exception as cache_err:
+                            logging.warning(f"[CACHE] Error checking cache for {layer_name}: {cache_err}")
+
+                    # ========== USE CACHE OR RUN MODEL ==========
+                    if cache_hit and cached_geojson:
+                        # FAST PATH: Use cached GeoJSON
+                        clean_data = cached_geojson
+
+                        # Extract weather and feature count from cached data
+                        feature_count = len(cached_geojson.get('features', []))
+
+                        # Weather metadata from cached data (if available in properties)
+                        weather_metadata = {}
+                        if cached_geojson.get('features') and len(cached_geojson['features']) > 0:
+                            first_feature_props = cached_geojson['features'][0].get('properties', {})
+                            if 'temperature' in first_feature_props:
+                                temps = [f['properties'].get('temperature', 20.0) for f in cached_geojson['features']]
+                                weather_metadata['temperature'] = sum(temps) / len(temps) if temps else 20.0
+                            if 'precipitation' in first_feature_props:
+                                precips = [f['properties'].get('precipitation', 0.0) for f in cached_geojson['features']]
+                                weather_metadata['precipitation'] = sum(precips) / len(precips) if precips else 0.0
+                            if 'wind_speed' in first_feature_props:
+                                winds = [f['properties'].get('wind_speed', 10.0) for f in cached_geojson['features']]
+                                weather_metadata['wind_speed'] = sum(winds) / len(winds) if winds else 10.0
+
+                    else:
+                        # SLOW PATH: Run model prediction
+                        # override time-based features on a copy
+                        gdf = features_gdf.copy()
+                        sp = parse_search_parameters({
+                            "season": season,
+                            "week_type": week_type,
+                            "time_of_day": tod,
+                        })
+                        gdf['Hour'] = sp['features']['Hour']
+                        gdf['Month'] = sp['features']['Month']
+                        gdf['DayOfWeek'] = sp['features']['DayOfWeek']
+                        gdf['is_weekend'] = sp['features']['is_weekend']
+                        gdf['time_of_day'] = sp['features']['time_of_day']
+
+                        # CRITICAL: Apply season AND time-of-day specific weather data
+                        weather_data = seasonal_weather.get(season, {}).get(tod, {})
+                        gdf['temperature'] = weather_data.get('temperature', 20.0)
+                        gdf['precipitation'] = weather_data.get('precipitation', 0.0)
+                        gdf['wind_speed'] = weather_data.get('wind_speed', 10.0)
+
+                        # prepare and predict
+                        model_features = prepare_model_features(gdf)
+                        # Ensure categorical as strings
+                        for col in CAT_COLS:
+                            if col in model_features.columns:
+                                model_features[col] = model_features[col].astype(str)
+                        cat_feature_indices = [model_features.columns.get_loc(col) for col in CAT_COLS if col in model_features.columns]
+                        pool = Pool(model_features, cat_features=cat_feature_indices)
+
+                        y_pred = model.predict(pool)
+                        y_proba = model.predict_proba(pool)
+
+                        gdf_out = gdf.copy()
+                        # Convert model classes (0-4) to user-facing classes (1-5)
+                        gdf_out["volume_class"] = (y_pred.astype(int) + 1).astype(int)
+                        # add probabilities
+                        if hasattr(y_proba, 'ndim') and y_proba.ndim > 1:
+                            for i in range(y_proba.shape[1]):
+                                gdf_out[f"proba_{i+1}"] = y_proba[:, i]
+                            try:
+                                import numpy as _np
+                                gdf_out['proba_top'] = _np.asarray(y_proba).max(axis=1)
+                            except Exception:
+                                pass
+                        else:
+                            gdf_out['proba_1'] = y_proba
+
+                        # serialize to clean GeoJSON
+                        clean_data = clean_geojson(gdf_out.__geo_interface__)
+
+                        # Extract weather metadata (average across all streets in this layer)
+                        weather_metadata = {}
+                        if 'temperature' in gdf_out.columns:
+                            weather_metadata['temperature'] = float(gdf_out['temperature'].mean())
+                        if 'precipitation' in gdf_out.columns:
+                            weather_metadata['precipitation'] = float(gdf_out['precipitation'].mean())
+                        if 'wind_speed' in gdf_out.columns:
+                            weather_metadata['wind_speed'] = float(gdf_out['wind_speed'].mean())
+
+                        feature_count = int(len(gdf_out))
+
+                        # ========== SAVE TO CACHE ==========
+                        if CACHE_ENABLED and place and bbox:
+                            try:
+                                is_weekend = (week_type == "weekend")
+                                cache_key = build_cache_key(
+                                    country=country,
+                                    city=place,
+                                    season=season,
+                                    is_weekend=is_weekend,
+                                    time_of_day=tod,
+                                    bbox=bbox
+                                )
+                                save_cached_geojson(cache_key, clean_data)
+                                logging.info(f"[CACHE SAVE] Saved {layer_name} to cache: {cache_key}")
+                            except Exception as save_err:
+                                logging.warning(f"[CACHE] Error saving {layer_name} to cache: {save_err}")
+
+                    # Write to GPKG if requested (reconstruct GeoDataFrame from GeoJSON if needed)
                     if create_gpkg and gpkg_path:
                         try:
+                            # If we hit cache, reconstruct gdf_out from cached GeoJSON
+                            if cache_hit and cached_geojson:
+                                gdf_out = gpd.GeoDataFrame.from_features(cached_geojson['features'])
                             # Write this layer to GPKG (mode='a' to append after first layer)
                             write_mode = 'w' if not gpkg_path.exists() else 'a'
                             gdf_out.to_file(gpkg_path, layer=layer_name, driver='GPKG', mode=write_mode)
@@ -2996,7 +3104,7 @@ def predict_multi():
                     layers.append({
                         "name": layer_name,
                         "geojson": clean_data,
-                        "feature_count": int(len(gdf_out)),
+                        "feature_count": feature_count,
                         "is_prediction_layer": True,
                         "weather": weather_metadata,
                         "season": season,

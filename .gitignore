@@ -77,7 +77,8 @@ Thumbs.db
 *.cpg
 
 # Cache and temporary directories
-api/cache/
+api/cache/*.json
+api/cache/*.parquet
 api/temp/
 temp/
 cache/
