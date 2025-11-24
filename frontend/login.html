@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>התחברות - חיזוי נפח הולכי רגל</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            direction: rtl;
+        }
+
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 400px;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-30px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .login-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .login-header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            direction: ltr;
+            text-align: left;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .login-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            display: none;
+            animation: shake 0.5s;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .welcome-info {
+            background: #f0f7ff;
+            border: 1px solid #d0e7ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #0066cc;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .welcome-info strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>התחברות למערכת</h1>
+            <p>חיזוי נפח הולכי רגל</p>
+        </div>
+
+        <div class="welcome-info">
+            <strong>ברוכים הבאים!</strong>
+            התחבר עם שם המשתמש והסיסמה שלך
+        </div>
+
+        <div id="errorMessage" class="error-message"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">שם משתמש:</label>
+                <input
+                    type="text"
+                    id="username"
+                    name="username"
+                    placeholder="user1, user2, ..."
+                    required
+                    autocomplete="username"
+                />
+            </div>
+
+            <div class="form-group">
+                <label for="password">סיסמה:</label>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    placeholder="הזן סיסמה"
+                    required
+                    autocomplete="current-password"
+                />
+            </div>
+
+            <button type="submit" id="loginBtn" class="login-btn">
+                <span id="loginBtnText">התחבר</span>
+            </button>
+        </form>
+    </div>
+
+    <script>
+        // API base URL configuration
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const API_BASE = isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-web.onrender.com';
+
+        const loginForm = document.getElementById('loginForm');
+        const errorMessage = document.getElementById('errorMessage');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginBtnText = document.getElementById('loginBtnText');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+
+        // Check if user is already logged in
+        const currentUser = localStorage.getItem('currentUser');
+        if (currentUser) {
+            window.location.href = 'index.html';
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+        }
+
+        function hideError() {
+            errorMessage.classList.remove('show');
+        }
+
+        function setLoading(loading) {
+            if (loading) {
+                loginBtn.disabled = true;
+                loginBtnText.innerHTML = '<span class="spinner"></span>מתחבר...';
+            } else {
+                loginBtn.disabled = false;
+                loginBtnText.textContent = 'התחבר';
+            }
+        }
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError();
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+                showError('נא למלא את כל השדות');
+                return;
+            }
+
+            setLoading(true);
+
+            try {
+                const response = await fetch(`${API_BASE}/api/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'שגיאה בהתחברות');
+                }
+
+                // Login successful - store user info
+                localStorage.setItem('currentUser', JSON.stringify(data.user));
+                localStorage.setItem('username', username);
+                localStorage.setItem('password', password); // For subsequent API calls
+
+                // Redirect to main application
+                window.location.href = 'index.html';
+
+            } catch (error) {
+                console.error('Login error:', error);
+                showError(error.message || 'שם משתמש או סיסמה שגויים');
+                setLoading(false);
+            }
+        });
+
+        // Focus username field on load
+        usernameInput.focus();
+    </script>
+</body>
+</html>

@@ -700,3 +700,145 @@ body {
 .leaflet-popup-tip {
     box-shadow: none !important;
 }
+
+/* Small Login Popup (upper left corner) */
+.login-popup {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 2000;
+    background: white;
+    border-radius: 10px;
+    padding: 15px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    min-width: 220px;
+}
+
+.login-popup.hidden {
+    display: none;
+}
+
+.login-popup-content h3 {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+    color: #333;
+    text-align: center;
+}
+
+.login-popup-content input {
+    width: 100%;
+    padding: 8px;
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    font-size: 14px;
+    margin-bottom: 8px;
+    direction: ltr;
+    text-align: left;
+}
+
+.login-popup-content input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.login-submit-btn {
+    width: 100%;
+    padding: 8px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.login-submit-btn:hover {
+    background: #45a049;
+}
+
+.login-submit-btn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.login-error {
+    margin-top: 8px;
+    padding: 6px;
+    background: #ffebee;
+    color: #c62828;
+    border-radius: 4px;
+    font-size: 12px;
+    text-align: center;
+}
+
+.login-error.hidden {
+    display: none;
+}
+
+/* User Info Bar (in right panel) */
+.user-info-bar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 12px 15px;
+    margin: -20px -20px 15px -20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+    border-radius: 0;
+}
+
+.user-info-bar.hidden {
+    display: none;
+}
+
+.user-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.user-greeting {
+    font-size: 14px;
+}
+
+.user-greeting strong {
+    font-weight: 700;
+}
+
+.user-role-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.3);
+    width: fit-content;
+}
+
+.user-role-badge.role-admin {
+    background: #ff9800;
+    color: white;
+}
+
+.user-role-badge.role-student {
+    background: rgba(255, 255, 255, 0.3);
+    color: white;
+}
+
+.logout-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 5px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.logout-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.6);
+}

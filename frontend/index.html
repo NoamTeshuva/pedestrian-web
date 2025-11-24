@@ -16,6 +16,21 @@
     <!-- Full screen map -->
     <div id="map" class="fullscreen-map"></div>
 
+    <!-- Small Login Popup (upper left) -->
+    <div class="login-popup" id="loginPopup">
+        <div class="login-popup-content">
+            <h3>התחברות</h3>
+            <input
+                type="text"
+                id="loginUsername"
+                placeholder="שם משתמש (user1, user2...)"
+                autocomplete="username"
+            />
+            <button id="loginSubmitBtn" class="login-submit-btn">כניסה</button>
+            <div id="loginError" class="login-error hidden"></div>
+        </div>
+    </div>
+
     <!-- Right Search Panel -->
     <div class="right-panel" id="searchPanel">
         <div class="panel-header">
@@ -23,6 +38,15 @@
             <button class="panel-collapse-btn" id="panelCollapseBtn">
                 <span class="collapse-icon">X</span>
             </button>
+        </div>
+
+        <!-- User Info Bar -->
+        <div class="user-info-bar" id="userInfoBar">
+            <div class="user-details">
+                <span class="user-greeting">שלום, <strong id="userFullName"></strong></span>
+                <span class="user-role-badge" id="userRoleBadge"></span>
+            </div>
+            <button class="logout-btn" id="logoutBtn">יציאה</button>
         </div>
         
         <div class="panel-content">
@@ -148,6 +172,143 @@
             // Updated to use new backend URL
             window.API_BASE = ls || (isLocal ? 'http://127.0.0.1:8000' : 'https://pedestrian-web.onrender.com');
             console.log('[API_BASE]', window.API_BASE);
+        })();
+    </script>
+
+    <!-- Authentication Check and Login Popup -->
+    <script>
+        (function () {
+            const DEFAULT_PASSWORD = 'pedestrian2024';
+
+            // Check if user is logged in
+            const currentUserStr = localStorage.getItem('currentUser');
+
+            document.addEventListener('DOMContentLoaded', function() {
+                const loginPopup = document.getElementById('loginPopup');
+                const loginUsername = document.getElementById('loginUsername');
+                const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+                const loginError = document.getElementById('loginError');
+                const userInfoBar = document.getElementById('userInfoBar');
+                const userFullName = document.getElementById('userFullName');
+                const userRoleBadge = document.getElementById('userRoleBadge');
+                const logoutBtn = document.getElementById('logoutBtn');
+
+                function showLogin() {
+                    loginPopup.classList.remove('hidden');
+                    userInfoBar.classList.add('hidden');
+                    loginUsername.focus();
+                }
+
+                function hideLogin() {
+                    loginPopup.classList.add('hidden');
+                    userInfoBar.classList.remove('hidden');
+                }
+
+                function showError(message) {
+                    loginError.textContent = message;
+                    loginError.classList.remove('hidden');
+                }
+
+                function hideError() {
+                    loginError.classList.add('hidden');
+                }
+
+                async function performLogin(username) {
+                    hideError();
+                    loginSubmitBtn.disabled = true;
+                    loginSubmitBtn.textContent = '...';
+
+                    try {
+                        const response = await fetch(`${window.API_BASE}/api/login`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                username: username,
+                                password: DEFAULT_PASSWORD
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (!response.ok) {
+                            throw new Error(data.error || 'שגיאה בהתחברות');
+                        }
+
+                        // Login successful
+                        window.CURRENT_USER = data.user;
+                        localStorage.setItem('currentUser', JSON.stringify(data.user));
+                        localStorage.setItem('username', username);
+
+                        // Display user info
+                        userFullName.textContent = data.user.full_name || data.user.username;
+                        const roleText = data.user.role === 'admin' ? 'מנהל' : 'סטודנט';
+                        userRoleBadge.textContent = roleText;
+                        userRoleBadge.className = `user-role-badge role-${data.user.role}`;
+
+                        hideLogin();
+                        console.log('[AUTH] Logged in as:', data.user.username, `(${data.user.full_name})`);
+
+                    } catch (error) {
+                        console.error('Login error:', error);
+                        showError(error.message || 'שם משתמש שגוי');
+                    } finally {
+                        loginSubmitBtn.disabled = false;
+                        loginSubmitBtn.textContent = 'כניסה';
+                    }
+                }
+
+                // Login button click
+                loginSubmitBtn.addEventListener('click', function() {
+                    const username = loginUsername.value.trim();
+                    if (!username) {
+                        showError('נא להזין שם משתמש');
+                        return;
+                    }
+                    performLogin(username);
+                });
+
+                // Enter key in username field
+                loginUsername.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        loginSubmitBtn.click();
+                    }
+                });
+
+                // Logout functionality
+                if (logoutBtn) {
+                    logoutBtn.addEventListener('click', function() {
+                        if (confirm('האם אתה בטוח שברצונך להתנתק?')) {
+                            localStorage.removeItem('currentUser');
+                            localStorage.removeItem('username');
+                            window.CURRENT_USER = null;
+                            loginUsername.value = '';
+                            showLogin();
+                        }
+                    });
+                }
+
+                // Check if already logged in
+                if (currentUserStr) {
+                    try {
+                        const currentUser = JSON.parse(currentUserStr);
+                        window.CURRENT_USER = currentUser;
+
+                        userFullName.textContent = currentUser.full_name || currentUser.username;
+                        const roleText = currentUser.role === 'admin' ? 'מנהל' : 'סטודנט';
+                        userRoleBadge.textContent = roleText;
+                        userRoleBadge.className = `user-role-badge role-${currentUser.role}`;
+
+                        hideLogin();
+                        console.log('[AUTH] Already logged in as:', currentUser.username);
+                    } catch (error) {
+                        console.error('[AUTH] Invalid user data');
+                        localStorage.removeItem('currentUser');
+                        showLogin();
+                    }
+                } else {
+                    showLogin();
+                }
+            });
         })();
     </script>
 
