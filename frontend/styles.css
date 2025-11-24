@@ -812,12 +812,13 @@ body {
 .user-info-bar {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     padding: 12px 15px;
-    margin: -20px -20px 15px -20px;
+    margin: 0 0 20px 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
     color: white;
-    border-radius: 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .user-info-bar.hidden {
@@ -827,11 +828,16 @@ body {
 .user-details {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
 }
 
 .user-greeting {
     font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .user-greeting strong {
@@ -840,7 +846,7 @@ body {
 
 .user-role-badge {
     display: inline-block;
-    padding: 3px 10px;
+    padding: 4px 12px;
     border-radius: 12px;
     font-size: 11px;
     font-weight: 600;
@@ -867,6 +873,8 @@ body {
     font-size: 12px;
     cursor: pointer;
     transition: all 0.3s;
+    flex-shrink: 0;
+    margin-right: 10px;
 }
 
 .logout-btn:hover {
