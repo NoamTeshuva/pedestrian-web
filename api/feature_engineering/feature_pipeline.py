@@ -742,6 +742,41 @@ def prepare_model_features(features_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
 # DISK CACHE: Works across multiple Gunicorn workers by storing cache on disk.
 # This solves the multi-worker problem where each process has its own memory space.
 
+def _prepare_gdf_for_cache(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """
+    Prepare GeoDataFrame for Parquet serialization by normalizing problematic columns.
+
+    The main issue is osmid, which can be:
+    - A single int/string
+    - A list of ints (for merged edges)
+    - A tuple of ints
+
+    Parquet doesn't handle mixed types well, so we convert osmid to a consistent string format.
+
+    Args:
+        gdf: GeoDataFrame to prepare
+
+    Returns:
+        Cleaned copy of GeoDataFrame safe for Parquet serialization
+    """
+    gdf_clean = gdf.copy()
+
+    # Normalize osmid column if present
+    if 'osmid' in gdf_clean.columns:
+        def serialize_osmid(v):
+            """Convert osmid to string format, handling lists/tuples."""
+            if isinstance(v, (list, tuple)):
+                # Multiple osmids (merged edges) - join with comma
+                return ",".join(map(str, v)) if v else None
+            # Single osmid - convert to string
+            return str(v) if v is not None else None
+
+        gdf_clean['osmid'] = gdf_clean['osmid'].apply(serialize_osmid)
+        logging.debug(f"[CACHE PREP] Normalized osmid column for {len(gdf_clean)} features")
+
+    return gdf_clean
+
+
 def run_static_feature_pipeline_cached(
     place: Optional[str],
     bbox_key: Optional[Tuple[float, float, float, float]]
@@ -779,8 +814,11 @@ def run_static_feature_pipeline_cached(
         bbox=bbox_key
     )
 
+    # Clean GeoDataFrame for Parquet serialization (normalize osmid)
+    gdf_for_cache = _prepare_gdf_for_cache(features_gdf)
+
     # Store in disk cache
-    disk_cache.set(place, bbox_key, features_gdf, metadata)
+    disk_cache.set(place, bbox_key, gdf_for_cache, metadata)
 
     return features_gdf, metadata
 
