@@ -19,7 +19,7 @@ USERS_FILE = os.path.join(os.path.dirname(__file__), 'users.json')
 def load_users() -> Dict[str, Any]:
     """Load users from users.json file."""
     try:
-        with open(USERS_FILE, 'r') as f:
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
