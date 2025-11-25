@@ -4,11 +4,20 @@
  * Global functions for vanilla JS (non-module) usage
  */
 
-// Get base URL from environment variables with fallback
+// Get base URL based on where the page is running
 function getBaseURL() {
-    // For now, just return the default for local development
-    // TODO: Add proper environment variable detection for different deployment scenarios
-    return "http://127.0.0.1:8000";
+    // Check if running on localhost
+    const isLocalHost =
+        window.location.hostname === '127.0.0.1' ||
+        window.location.hostname === 'localhost';
+
+    if (isLocalHost) {
+        // Local development - connect to local Flask server
+        return "http://127.0.0.1:8000";
+    } else {
+        // Production - connect to production API
+        return "https://pedestrian-web.onrender.com";
+    }
 }
 
 const API_BASE_URL = getBaseURL();
