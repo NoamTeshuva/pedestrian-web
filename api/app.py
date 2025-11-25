@@ -36,7 +36,8 @@ import osmnx as ox
 ox.settings.max_query_area_size = 0.25  # deg² (~50km × 50km at mid-latitudes)
 
 # Optimize OSMnx for faster downloads
-ox.settings.timeout = 300  # Increase Overpass API timeout to 5 minutes
+# CRITICAL: OSMnx v2 uses 'requests_timeout' not 'timeout' (deprecated)
+ox.settings.requests_timeout = 300  # Increase Overpass API timeout to 5 minutes
 ox.settings.memory = 2147483648  # 2GB RAM for Overpass (helps with complex queries)
 ox.settings.cache_folder = "/tmp/osmnx_cache"  # Use temp folder on Render
 ox.settings.all_oneway = True  # Simplify by making all edges oneway initially (we convert to undirected later)
@@ -47,7 +48,7 @@ ox.settings.useful_tags_way = ['highway', 'name', 'length']
 
 # Use stderr for unbuffered output in Gunicorn
 sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size} deg²\n")
-sys.stderr.write(f"[STARTUP] Configured OSMnx timeout: {ox.settings.timeout}s, memory: {ox.settings.memory / 1024**3:.1f}GB\n")
+sys.stderr.write(f"[STARTUP] Configured OSMnx requests_timeout: {ox.settings.requests_timeout}s, memory: {ox.settings.memory / 1024**3:.1f}GB\n")
 sys.stderr.flush()
 
 # Load environment variables from .env file (for local development)
