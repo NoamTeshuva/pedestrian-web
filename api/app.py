@@ -24,7 +24,9 @@ warnings.filterwarnings(
 # This MUST be done before importing feature_engineering modules
 import osmnx as ox
 ox.settings.max_query_area_size = 50000 * 50000  # 50km × 50km
-print(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size:,} m²")
+# Use stderr for unbuffered output in Gunicorn
+sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size:,} m²\n")
+sys.stderr.flush()
 
 # Load environment variables from .env file (for local development)
 try:
