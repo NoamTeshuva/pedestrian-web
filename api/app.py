@@ -2875,9 +2875,10 @@ def predict_multi():
             bbox_height = north - south
             bbox_area = bbox_width * bbox_height
 
-            # Max area threshold: ~0.01 degrees² (roughly 1km x 1km)
-            # This is about 4x OSMnx's default max query area
-            MAX_BBOX_AREA = 0.01
+            # Max area threshold: 0.000002 degrees²
+            # This is about 5x OSMnx's default max query area (~0.0000004 deg²)
+            # Allows reasonable bbox draws while preventing worker timeouts
+            MAX_BBOX_AREA = 0.000002
 
             if bbox_area > MAX_BBOX_AREA:
                 return jsonify({
