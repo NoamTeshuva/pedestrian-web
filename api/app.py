@@ -2882,15 +2882,29 @@ def predict_multi():
 
         # DEBUG: Log endpoint entry with PID and parameters
         import os
-        logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}")
+        logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}, is_city_search={is_city_search}")
 
-        # Get STATIC features from cache (no timestamp - perfect cache reuse!)
+        # Get STATIC features
+        # City search: Use cached version (same location = same features)
+        # Manual bbox: Use non-cached version (unique bbox = never matches cache)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
-        from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
-        features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
-            place=place,
-            bbox=bbox
-        )
+
+        if is_city_search:
+            # Use cached version for city searches
+            from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
+            features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
+                place=place,
+                bbox=bbox
+            )
+        else:
+            # Use non-cached version for manual bbox draws (skip all cache checks)
+            from feature_engineering.feature_pipeline import run_static_feature_pipeline
+            features_gdf, pipeline_metadata = run_static_feature_pipeline(
+                place=place,
+                bbox=bbox,
+                timestamp=None  # Static features only
+            )
+
         update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
 
         if features_gdf is None or len(features_gdf) == 0:
