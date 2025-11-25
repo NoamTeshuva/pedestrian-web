@@ -17,6 +17,11 @@ import geopandas as gpd
 import osmnx as ox
 import networkx as nx
 
+# Configure OSMnx to be less conservative about Overpass API limits
+# Default is too cautious and subdivides even small areas into 25+ pieces
+# Increase this to allow larger single queries before subdivision
+ox.settings.max_query_area_size = 50000 * 50000  # 50km x 50km = reasonable max
+
 # Import loading animation control from app.py
 try:
     import sys
