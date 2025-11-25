@@ -27,13 +27,14 @@ import osmnx as ox
 # CRITICAL: OSMnx uses DEGREES² for area calculations (geographic coordinates)
 # NOT meters²! The area is calculated from shapely geometries in EPSG:4326.
 #
-# Convert 50km × 50km to degrees² at mid-latitudes (~32°N):
-#   - 1° longitude ≈ 95,000 m at 32°N
-#   - 1° latitude ≈ 111,000 m
-#   - 50km = 0.526° longitude × 0.450° latitude = 0.237 deg²
+# IMPORTANT: Setting this TOO LOW causes subdivision, which is VERY SLOW because
+# OSMnx pauses between each sub-query to respect Overpass API rate limits.
+# With 42 subdivisions × 5-10s pause each = 210-420 seconds of just waiting!
 #
-# Using 0.25 deg² (slightly larger for safety)
-ox.settings.max_query_area_size = 0.25  # deg² (~50km × 50km at mid-latitudes)
+# Solution: Set HUGE value to disable subdivision completely for all reasonable bbox sizes
+# 1° × 1° at 32°N ≈ 95km × 111km = 10,545 km²
+# Using 10 deg² allows bboxes up to ~316km × 316km without subdivision
+ox.settings.max_query_area_size = 10.0  # deg² (HUGE - disable subdivision)
 
 # Optimize OSMnx for faster downloads
 # CRITICAL: OSMnx v2 uses 'requests_timeout' not 'timeout' (deprecated)
@@ -41,6 +42,10 @@ ox.settings.requests_timeout = 300  # Increase Overpass API timeout to 5 minutes
 ox.settings.memory = 2147483648  # 2GB RAM for Overpass (helps with complex queries)
 ox.settings.cache_folder = "/tmp/osmnx_cache"  # Use temp folder on Render
 ox.settings.all_oneway = True  # Simplify by making all edges oneway initially (we convert to undirected later)
+
+# CRITICAL: Reduce Overpass API rate limiting pauses
+# Default is often 5-10 seconds between requests, which is KILLER for subdivided queries
+ox.settings.overpass_rate_limit = False  # Disable automatic rate limit detection (we're not hammering the API)
 
 # Reduce the amount of data downloaded by limiting useful_tags_way
 # We only need basic geometry and highway type for pedestrian modeling
