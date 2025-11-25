@@ -20,6 +20,12 @@ warnings.filterwarnings(
     category=DeprecationWarning,
 )
 
+# Configure OSMnx BEFORE any other imports that might use it
+# This MUST be done before importing feature_engineering modules
+import osmnx as ox
+ox.settings.max_query_area_size = 50000 * 50000  # 50km × 50km
+print(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size:,} m²")
+
 # Load environment variables from .env file (for local development)
 try:
     from dotenv import load_dotenv
