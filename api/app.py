@@ -2884,14 +2884,26 @@ def predict_multi():
         import os
         logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}, is_city_search={is_city_search}")
 
-        # Get STATIC features (uses disk cache for street networks)
-        # Note: Vultr S3 cache for predictions is only enabled for city searches (see is_city_search check below)
+        # Get STATIC features
+        # City search: Use cached version (disk cache helps with repeated searches)
+        # Manual bbox: Skip ALL caching (unique coordinates, cache never hits)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
-        from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
-        features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
-            place=place,
-            bbox=bbox
-        )
+
+        if is_city_search:
+            # Use cached version for city searches
+            from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
+            features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
+                place=place,
+                bbox=bbox
+            )
+        else:
+            # BBOX: Skip disk cache - go straight to OSMnx
+            from feature_engineering.feature_pipeline import run_static_feature_pipeline
+            features_gdf, pipeline_metadata = run_static_feature_pipeline(
+                place=place,
+                bbox=bbox
+            )
+
         update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
 
         if features_gdf is None or len(features_gdf) == 0:
