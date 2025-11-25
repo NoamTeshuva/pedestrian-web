@@ -181,17 +181,30 @@ def extract_street_network(place: Optional[str] = None,
     """
     try:
         log_with_clear(f"Extracting street network for {place or 'bbox'}")
-        
+
         # Download street network
         if place:
             G = ox.graph_from_place(place, network_type=PipelineConfig.NETWORK_TYPE)
         else:
             # OSMnx 2.0+ expects bbox as (west, south, east, north) tuple
             bbox_osmnx = (bbox[0], bbox[1], bbox[2], bbox[3])  # (west, south, east, north)
+
+            logging.info(f"[OSMNX] Calling ox.graph_from_bbox with:")
+            logging.info(f"[OSMNX]   bbox: {bbox_osmnx}")
+            logging.info(f"[OSMNX]   network_type: {PipelineConfig.NETWORK_TYPE}")
+            logging.info(f"[OSMNX] Starting download... (this may take time for large areas)")
+
+            import time
+            start_time = time.time()
+
             G = ox.graph_from_bbox(
                 bbox=bbox_osmnx,
                 network_type=PipelineConfig.NETWORK_TYPE
             )
+
+            elapsed = time.time() - start_time
+            logging.info(f"[OSMNX] Download completed in {elapsed:.1f} seconds")
+            logging.info(f"[OSMNX] Downloaded {len(G.nodes)} nodes, {len(G.edges)} edges")
         
         # Project to metric CRS for accurate length calculation
         G_proj = ox.project_graph(G, to_crs=f"EPSG:{PipelineConfig.CRS_METRIC}")

@@ -900,7 +900,22 @@ class PedestrianPredictionApp {
 				north: bounds.getNorth(),
 			};
 
-			console.log("BBox drawn:", bbox);
+			// DEBUG: Calculate and log bbox dimensions
+			const widthDeg = bbox.east - bbox.west;
+			const heightDeg = bbox.north - bbox.south;
+			const widthM = widthDeg * 95000; // approximate at ~32°N
+			const heightM = heightDeg * 111000;
+			const areaM2 = widthM * heightM;
+			console.log("========================================");
+			console.log("BBOX DRAW DEBUG (Frontend)");
+			console.log("========================================");
+			console.log("Raw bounds:", bounds);
+			console.log(`Bbox: W=${bbox.west.toFixed(8)}, S=${bbox.south.toFixed(8)}, E=${bbox.east.toFixed(8)}, N=${bbox.north.toFixed(8)}`);
+			console.log(`Width: ${widthDeg.toFixed(8)}° = ${widthM.toFixed(0)} meters`);
+			console.log(`Height: ${heightDeg.toFixed(8)}° = ${heightM.toFixed(0)} meters`);
+			console.log(`Area: ${areaM2.toFixed(0)} m²`);
+			console.log("This bbox will be sent to backend exactly as shown above");
+			console.log("========================================");
 			this.showStatusMessage("האזור סומן בהצלחה", "success");
 		});
 	}

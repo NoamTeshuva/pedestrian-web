@@ -2867,6 +2867,52 @@ def predict_multi():
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
 
+        # COMPREHENSIVE BBOX DEBUGGING
+        if bbox and not place:
+            west, south, east, north = bbox
+            width_deg = east - west
+            height_deg = north - south
+            area_deg2 = width_deg * height_deg
+
+            # Calculate physical dimensions (approximate at Tel Aviv latitude ~32°N)
+            width_m = width_deg * 95000  # 1° longitude ≈ 95km at 32°N
+            height_m = height_deg * 111000  # 1° latitude ≈ 111km
+            area_m2 = width_m * height_m
+
+            # OSMnx max area (empirically determined from warnings)
+            osmnx_max_area = 0.00000042  # deg²
+            area_ratio = area_deg2 / osmnx_max_area
+
+            logging.info("=" * 80)
+            logging.info("BBOX DRAW DEBUGGING")
+            logging.info("=" * 80)
+            logging.info(f"Raw bbox string from frontend: {bbox_str}")
+            logging.info(f"Parsed bbox: W={west:.8f}, S={south:.8f}, E={east:.8f}, N={north:.8f}")
+            logging.info(f"")
+            logging.info(f"PHYSICAL DIMENSIONS:")
+            logging.info(f"  Width:  {width_deg:.8f}° = {width_m:.1f} meters ({width_m/100:.1f} city blocks)")
+            logging.info(f"  Height: {height_deg:.8f}° = {height_m:.1f} meters ({height_m/100:.1f} city blocks)")
+            logging.info(f"  Area:   {area_deg2:.10f} deg² = {area_m2:.0f} m²")
+            logging.info(f"")
+            logging.info(f"OSMNX ANALYSIS:")
+            logging.info(f"  OSMnx max comfortable area: {osmnx_max_area:.10f} deg²")
+            logging.info(f"  Your area is {area_ratio:.1f}x larger than OSMnx max")
+            if area_ratio > 25:
+                subdivisions = int(area_ratio)
+                estimated_time = subdivisions * 6
+                logging.warning(f"  ⚠️  OSMnx will subdivide into ~{subdivisions} pieces")
+                logging.warning(f"  ⚠️  Estimated download time: {estimated_time} seconds ({estimated_time/60:.1f} minutes)")
+                logging.warning(f"  ⚠️  Worker timeout: 180 seconds - THIS WILL TIMEOUT!")
+            else:
+                logging.info(f"  ✓ Area is reasonable, should complete quickly")
+            logging.info(f"")
+            logging.info(f"EXPECTED STREETS:")
+            # Rough estimate: major roads every 100m + minor roads/paths
+            estimated_streets = int((width_m + height_m) / 50)
+            logging.info(f"  Major roads: ~{max(3, int(estimated_streets * 0.2))} streets")
+            logging.info(f"  All walkable paths (footpaths, alleys, etc): ~{estimated_streets} total segments")
+            logging.info("=" * 80)
+
         # choose a representative timestamp (any valid combo) to build base features once
         # we will override Hour/is_weekend/time_of_day later per combination
         rep_ts = build_search_timestamp(seasons[0], week_types[0], times_of_day[0])
