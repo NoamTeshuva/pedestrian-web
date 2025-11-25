@@ -2867,28 +2867,6 @@ def predict_multi():
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
 
-        # Validate bbox size for manual bbox draws (prevent worker timeouts)
-        if not is_city_search and bbox:
-            # Calculate bbox area in square degrees
-            west, south, east, north = bbox
-            bbox_width = east - west
-            bbox_height = north - south
-            bbox_area = bbox_width * bbox_height
-
-            # Max area threshold: 0.000002 degrees²
-            # This is about 5x OSMnx's default max query area (~0.0000004 deg²)
-            # Allows reasonable bbox draws while preventing worker timeouts
-            MAX_BBOX_AREA = 0.000002
-
-            if bbox_area > MAX_BBOX_AREA:
-                return jsonify({
-                    "error": "Bbox area too large",
-                    "message": f"The drawn area ({bbox_area:.6f} deg²) exceeds the maximum allowed ({MAX_BBOX_AREA} deg²). Please draw a smaller area or use city name search instead.",
-                    "bbox_area": bbox_area,
-                    "max_area": MAX_BBOX_AREA,
-                    "suggestion": "For large areas, use the city name search feature instead of drawing a bbox."
-                }), 400
-
         # choose a representative timestamp (any valid combo) to build base features once
         # we will override Hour/is_weekend/time_of_day later per combination
         rep_ts = build_search_timestamp(seasons[0], week_types[0], times_of_day[0])
@@ -2906,26 +2884,14 @@ def predict_multi():
         import os
         logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}, is_city_search={is_city_search}")
 
-        # Get STATIC features
-        # City search: Use cached version (same location = same features)
-        # Manual bbox: Use non-cached version (unique bbox = never matches cache)
+        # Get STATIC features (uses disk cache for street networks)
+        # Note: Vultr S3 cache for predictions is only enabled for city searches (see is_city_search check below)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
-
-        if is_city_search:
-            # Use cached version for city searches
-            from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
-            features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
-                place=place,
-                bbox=bbox
-            )
-        else:
-            # Use non-cached version for manual bbox draws (skip all cache checks)
-            from feature_engineering.feature_pipeline import run_static_feature_pipeline
-            features_gdf, pipeline_metadata = run_static_feature_pipeline(
-                place=place,
-                bbox=bbox
-            )
-
+        from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
+        features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
+            place=place,
+            bbox=bbox
+        )
         update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
 
         if features_gdf is None or len(features_gdf) == 0:
