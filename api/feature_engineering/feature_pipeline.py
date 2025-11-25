@@ -198,23 +198,56 @@ def extract_street_network(place: Optional[str] = None,
             logging.info(f"[OSMNX] Calling ox.graph_from_bbox with:")
             logging.info(f"[OSMNX]   bbox: {bbox_osmnx}")
             logging.info(f"[OSMNX]   network_type: {PipelineConfig.NETWORK_TYPE}")
-            logging.info(f"[OSMNX]   ox.settings.max_query_area_size: {ox.settings.max_query_area_size} m²")
+
+            # CRITICAL DEBUGGING: Check settings object
+            logging.info(f"[OSMNX] === SETTINGS DEBUGGING ===")
+            logging.info(f"[OSMNX]   ox.settings object id: {id(ox.settings)}")
+            logging.info(f"[OSMNX]   ox.settings.max_query_area_size: {ox.settings.max_query_area_size:,} m²")
+
+            # Import settings directly to compare
+            from osmnx import settings as ox_settings_module
+            logging.info(f"[OSMNX]   settings module id: {id(ox_settings_module)}")
+            logging.info(f"[OSMNX]   settings.max_query_area_size: {ox_settings_module.max_query_area_size:,} m²")
 
             # Calculate expected area to compare with OSMnx's calculation
             width_deg = bbox_osmnx[2] - bbox_osmnx[0]
             height_deg = bbox_osmnx[3] - bbox_osmnx[1]
+            area_deg2 = width_deg * height_deg
             approx_area_m2 = (width_deg * 95000) * (height_deg * 111000)
-            logging.info(f"[OSMNX]   Approx area: {approx_area_m2:.0f} m²")
-            logging.info(f"[OSMNX]   Will subdivide: {approx_area_m2 > ox.settings.max_query_area_size}")
+
+            logging.info(f"[OSMNX] === AREA CALCULATIONS ===")
+            logging.info(f"[OSMNX]   Width: {width_deg:.8f}° = {width_deg * 95000:.1f} m")
+            logging.info(f"[OSMNX]   Height: {height_deg:.8f}° = {height_deg * 111000:.1f} m")
+            logging.info(f"[OSMNX]   Area in deg²: {area_deg2:.10f} deg²")
+            logging.info(f"[OSMNX]   Area in m²: {approx_area_m2:.0f} m²")
+            logging.info(f"[OSMNX]   Ratio to max: {approx_area_m2 / ox.settings.max_query_area_size:.6f}")
+            logging.info(f"[OSMNX]   Will subdivide (our calc): {approx_area_m2 > ox.settings.max_query_area_size}")
             logging.info(f"[OSMNX] Starting download... (this may take time for large areas)")
 
             import time
+            import warnings
             start_time = time.time()
 
-            G = ox.graph_from_bbox(
-                bbox=bbox_osmnx,
-                network_type=PipelineConfig.NETWORK_TYPE
-            )
+            # Capture OSMnx warnings to see what it's actually using
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                G = ox.graph_from_bbox(
+                    bbox=bbox_osmnx,
+                    network_type=PipelineConfig.NETWORK_TYPE
+                )
+
+                # Log any warnings that occurred
+                if w:
+                    logging.warning(f"[OSMNX] === OSMnx WARNINGS CAPTURED ===")
+                    for warning in w:
+                        logging.warning(f"[OSMNX] {warning.category.__name__}: {warning.message}")
+                        # Try to extract the area ratio from the warning message
+                        msg_str = str(warning.message)
+                        if "times" in msg_str and "query area" in msg_str:
+                            logging.warning(f"[OSMNX] ⚠️ SUBDIVISION WARNING DETECTED!")
+                            logging.warning(f"[OSMNX] Full message: {msg_str}")
+                else:
+                    logging.info(f"[OSMNX] ✓ No subdivision warnings (area fits within max_query_area_size)")
 
             elapsed = time.time() - start_time
             logging.info(f"[OSMNX] Download completed in {elapsed:.1f} seconds")
