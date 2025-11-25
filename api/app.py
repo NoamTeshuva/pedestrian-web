@@ -2836,6 +2836,11 @@ def predict_multi():
         place = request.args.get("place")
         bbox_str = request.args.get("bbox")
 
+        # Track whether this is a city search or manual bbox draw
+        # City search: user provided place name → cache enabled
+        # Manual bbox: user drew rectangle → skip cache (unlikely to match)
+        is_city_search = (place is not None)
+
         # parse lists (fallback to defaults if not provided)
         def _parse_csv(argval, default_list):
             if argval is None or str(argval).strip() == "":
@@ -2851,8 +2856,8 @@ def predict_multi():
         # Get country parameter (default to israel)
         country = request.args.get("country", "israel").lower()
 
-        # CRITICAL: Israel-only validation for caching
-        if CACHE_ENABLED and not validate_country(country):
+        # CRITICAL: Israel-only validation for caching (only applies to city searches)
+        if CACHE_ENABLED and is_city_search and not validate_country(country):
             return jsonify({
                 "error": "Country not supported",
                 "message": f"Only 'israel' is supported. Received: {country}",
@@ -2972,13 +2977,14 @@ def predict_multi():
                     layer_name = f"{season}_{week_type}_{tod}"
 
                     # ========== CACHE CHECK (FAST PATH) ==========
+                    # ONLY for city searches - manual bbox draws skip cache
                     cached_geojson = None
                     cache_hit = False
 
                     # Debug: Show cache status
-                    print(f"[CACHE DEBUG] Layer {layer_name}: CACHE_ENABLED={CACHE_ENABLED}, place={place}, bbox={bbox is not None}")
+                    print(f"[CACHE DEBUG] Layer {layer_name}: CACHE_ENABLED={CACHE_ENABLED}, is_city_search={is_city_search}, place={place}, bbox={bbox is not None}")
 
-                    if CACHE_ENABLED and place and bbox:
+                    if CACHE_ENABLED and is_city_search and place and bbox:
                         try:
                             # Build cache key
                             is_weekend = (week_type == "weekend")
@@ -3086,7 +3092,8 @@ def predict_multi():
                         feature_count = int(len(gdf_out))
 
                         # ========== SAVE TO CACHE ==========
-                        if CACHE_ENABLED and place and bbox:
+                        # ONLY for city searches - manual bbox draws skip cache
+                        if CACHE_ENABLED and is_city_search and place and bbox:
                             try:
                                 is_weekend = (week_type == "weekend")
                                 cache_key = build_cache_key(
