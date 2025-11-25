@@ -2867,6 +2867,27 @@ def predict_multi():
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
 
+        # Validate bbox size for manual bbox draws (prevent worker timeouts)
+        if not is_city_search and bbox:
+            # Calculate bbox area in square degrees
+            west, south, east, north = bbox
+            bbox_width = east - west
+            bbox_height = north - south
+            bbox_area = bbox_width * bbox_height
+
+            # Max area threshold: ~0.01 degrees² (roughly 1km x 1km)
+            # This is about 4x OSMnx's default max query area
+            MAX_BBOX_AREA = 0.01
+
+            if bbox_area > MAX_BBOX_AREA:
+                return jsonify({
+                    "error": "Bbox area too large",
+                    "message": f"The drawn area ({bbox_area:.6f} deg²) exceeds the maximum allowed ({MAX_BBOX_AREA} deg²). Please draw a smaller area or use city name search instead.",
+                    "bbox_area": bbox_area,
+                    "max_area": MAX_BBOX_AREA,
+                    "suggestion": "For large areas, use the city name search feature instead of drawing a bbox."
+                }), 400
+
         # choose a representative timestamp (any valid combo) to build base features once
         # we will override Hour/is_weekend/time_of_day later per combination
         rep_ts = build_search_timestamp(seasons[0], week_types[0], times_of_day[0])
