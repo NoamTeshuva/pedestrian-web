@@ -23,9 +23,20 @@ warnings.filterwarnings(
 # Configure OSMnx BEFORE any other imports that might use it
 # This MUST be done before importing feature_engineering modules
 import osmnx as ox
-ox.settings.max_query_area_size = 50000 * 50000  # 50km × 50km
+
+# CRITICAL: OSMnx uses DEGREES² for area calculations (geographic coordinates)
+# NOT meters²! The area is calculated from shapely geometries in EPSG:4326.
+#
+# Convert 50km × 50km to degrees² at mid-latitudes (~32°N):
+#   - 1° longitude ≈ 95,000 m at 32°N
+#   - 1° latitude ≈ 111,000 m
+#   - 50km = 0.526° longitude × 0.450° latitude = 0.237 deg²
+#
+# Using 0.25 deg² (slightly larger for safety)
+ox.settings.max_query_area_size = 0.25  # deg² (~50km × 50km at mid-latitudes)
+
 # Use stderr for unbuffered output in Gunicorn
-sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size:,} m²\n")
+sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size} deg²\n")
 sys.stderr.flush()
 
 # Load environment variables from .env file (for local development)
@@ -2887,8 +2898,8 @@ def predict_multi():
             height_m = height_deg * 111000  # 1° latitude ≈ 111km
             area_m2 = width_m * height_m
 
-            # OSMnx max area (empirically determined from warnings)
-            osmnx_max_area = 0.00000042  # deg²
+            # Use the configured OSMnx max area
+            osmnx_max_area = ox.settings.max_query_area_size  # deg² (configured at startup)
             area_ratio = area_deg2 / osmnx_max_area
 
             logging.info("=" * 80)
@@ -2903,16 +2914,19 @@ def predict_multi():
             logging.info(f"  Area:   {area_deg2:.10f} deg² = {area_m2:.0f} m²")
             logging.info(f"")
             logging.info(f"OSMNX ANALYSIS:")
-            logging.info(f"  OSMnx max comfortable area: {osmnx_max_area:.10f} deg²")
-            logging.info(f"  Your area is {area_ratio:.1f}x larger than OSMnx max")
-            if area_ratio > 25:
+            logging.info(f"  OSMnx configured max area: {osmnx_max_area} deg²")
+            logging.info(f"  Area ratio: {area_ratio:.3f} ({area_ratio * 100:.1f}% of max)")
+            if area_ratio > 1.0:
                 subdivisions = int(area_ratio)
                 estimated_time = subdivisions * 6
                 logging.warning(f"  ⚠️  OSMnx will subdivide into ~{subdivisions} pieces")
                 logging.warning(f"  ⚠️  Estimated download time: {estimated_time} seconds ({estimated_time/60:.1f} minutes)")
-                logging.warning(f"  ⚠️  Worker timeout: 180 seconds - THIS WILL TIMEOUT!")
+                if estimated_time > 600:
+                    logging.warning(f"  ⚠️  Worker timeout: 600 seconds - THIS WILL TIMEOUT!")
+                else:
+                    logging.warning(f"  ⚠️  This may take a while but should complete within timeout")
             else:
-                logging.info(f"  ✓ Area is reasonable, should complete quickly")
+                logging.info(f"  ✓ Area fits within OSMnx max, no subdivision expected")
             logging.info(f"")
             logging.info(f"EXPECTED STREETS:")
             # Rough estimate: major roads every 100m + minor roads/paths
