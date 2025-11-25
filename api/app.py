@@ -2901,8 +2901,7 @@ def predict_multi():
             from feature_engineering.feature_pipeline import run_static_feature_pipeline
             features_gdf, pipeline_metadata = run_static_feature_pipeline(
                 place=place,
-                bbox=bbox,
-                timestamp=None  # Static features only
+                bbox=bbox
             )
 
         update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
