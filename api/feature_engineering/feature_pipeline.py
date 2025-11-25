@@ -190,6 +190,7 @@ def extract_street_network(place: Optional[str] = None,
         # Download street network
         if place:
             G = ox.graph_from_place(place, network_type=PipelineConfig.NETWORK_TYPE)
+            logging.info(f"[OSMNX] Downloaded graph type: {type(G).__name__}")
         else:
             # OSMnx 2.0+ expects bbox as (west, south, east, north) tuple
             bbox_osmnx = (bbox[0], bbox[1], bbox[2], bbox[3])  # (west, south, east, north)
@@ -218,6 +219,17 @@ def extract_street_network(place: Optional[str] = None,
             elapsed = time.time() - start_time
             logging.info(f"[OSMNX] Download completed in {elapsed:.1f} seconds")
             logging.info(f"[OSMNX] Downloaded {len(G.nodes)} nodes, {len(G.edges)} edges")
+            logging.info(f"[OSMNX] Graph type: {type(G).__name__}")
+
+        # CRITICAL: Convert to UNDIRECTED graph for pedestrian modeling
+        # By default, OSMnx returns MultiDiGraph (directed graph)
+        # Pedestrians can walk in both directions, so we need undirected
+        if G.is_directed():
+            logging.info(f"[OSMNX] Converting directed graph to undirected...")
+            G = ox.convert.to_undirected(G)
+            logging.info(f"[OSMNX] Converted to undirected graph: {type(G).__name__}")
+        else:
+            logging.info(f"[OSMNX] Graph is already undirected: {type(G).__name__}")
         
         # Project to metric CRS for accurate length calculation
         G_proj = ox.project_graph(G, to_crs=f"EPSG:{PipelineConfig.CRS_METRIC}")
