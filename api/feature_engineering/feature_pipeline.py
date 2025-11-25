@@ -197,6 +197,14 @@ def extract_street_network(place: Optional[str] = None,
             logging.info(f"[OSMNX] Calling ox.graph_from_bbox with:")
             logging.info(f"[OSMNX]   bbox: {bbox_osmnx}")
             logging.info(f"[OSMNX]   network_type: {PipelineConfig.NETWORK_TYPE}")
+            logging.info(f"[OSMNX]   ox.settings.max_query_area_size: {ox.settings.max_query_area_size} m²")
+
+            # Calculate expected area to compare with OSMnx's calculation
+            width_deg = bbox_osmnx[2] - bbox_osmnx[0]
+            height_deg = bbox_osmnx[3] - bbox_osmnx[1]
+            approx_area_m2 = (width_deg * 95000) * (height_deg * 111000)
+            logging.info(f"[OSMNX]   Approx area: {approx_area_m2:.0f} m²")
+            logging.info(f"[OSMNX]   Will subdivide: {approx_area_m2 > ox.settings.max_query_area_size}")
             logging.info(f"[OSMNX] Starting download... (this may take time for large areas)")
 
             import time
