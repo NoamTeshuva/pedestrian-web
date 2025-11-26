@@ -2898,6 +2898,10 @@ def predict_multi():
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
 
+        # Determine if this is a city search (for caching purposes)
+        # City searches use place name; bbox-only searches skip caching
+        is_city_search = (place is not None)
+
         # choose a representative timestamp (any valid combo) to build base features once
         # we will override Hour/is_weekend/time_of_day later per combination
         rep_ts = build_search_timestamp(seasons[0], week_types[0], times_of_day[0])
