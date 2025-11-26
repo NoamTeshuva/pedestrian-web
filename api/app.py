@@ -2996,6 +2996,19 @@ def calculate_average_layer(layers):
         return None
     
     try:
+        # DEBUG: Log layer structure
+        logging.info(f"[AVERAGE] Processing {len(layers)} layers for average calculation")
+        for idx, layer in enumerate(layers):
+            feature_count = len(layer.get('geojson', {}).get('features', []))
+            logging.info(f"[AVERAGE] Layer {idx} ({layer.get('name')}): {feature_count} features")
+            
+            # Sample first feature to see osmid format
+            if feature_count > 0:
+                first_feature = layer['geojson']['features'][0]
+                osmid = first_feature.get('properties', {}).get('osmid')
+                edge_id = first_feature.get('properties', {}).get('edge_id')
+                logging.info(f"[AVERAGE] Sample osmid type: {type(osmid)}, value: {osmid}")
+                logging.info(f"[AVERAGE] Sample edge_id type: {type(edge_id)}, value: {edge_id}")
         # Get the first layer as base structure
         base_layer = layers[0]
         if not base_layer.get('geojson') or not base_layer['geojson'].get('features'):
@@ -3090,6 +3103,20 @@ def calculate_average_layer(layers):
                 'geometry': avg_data['geometry'],
                 'properties': properties
             })
+
+        # DEBUG: Log matching statistics
+        total_streets_in_layers = {}
+        for layer in layers:
+            for feature in layer.get('geojson', {}).get('features', []):
+                osmid = feature.get('properties', {}).get('osmid')
+                if osmid:
+                    if isinstance(osmid, list):
+                        osmid = tuple(osmid)
+                    total_streets_in_layers[osmid] = total_streets_in_layers.get(osmid, 0) + 1
+            
+        logging.info(f"[AVERAGE] Total unique streets across all layers: {len(total_streets_in_layers)}")
+        logging.info(f"[AVERAGE] Streets in average layer: {len(average_features)}")
+        logging.info(f"[AVERAGE] Missing streets: {len(total_streets_in_layers) - len(average_features)}")       
         
         # Create average layer
         average_geojson = {
