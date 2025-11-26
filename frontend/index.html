@@ -115,6 +115,18 @@
                 </button>
             </div>
 
+            <!-- Row 5: CSV Upload -->
+            <div class="panel-row">
+                <label class="file-btn">
+                    בחר קובץ CSV
+                    <input id="csvFileInput" type="file" accept=".csv" />
+                </label>
+                <button id="uploadCsvBtn" class="panel-btn" disabled>
+                    <span id="uploadCsvBtnText">שלח CSV</span>
+                    <span id="uploadCsvSpinner" class="spinner hidden">⌛</span>
+                </button>
+            </div>
+
             <!-- Progress Section (shown during batch processing) -->
             <div id="progressSection" class="progress-section hidden">
                 <h3>מעבד חיזויים...</h3>

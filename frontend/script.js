@@ -59,6 +59,12 @@ class PedestrianPredictionApp {
 		this.uploadGpkgBtnText = document.getElementById("uploadGpkgBtnText");
 		this.uploadGpkgSpinner = document.getElementById("uploadGpkgSpinner");
 
+		// CSV upload elements
+		this.csvFileInput = document.getElementById("csvFileInput");
+		this.uploadCsvBtn = document.getElementById("uploadCsvBtn");
+		this.uploadCsvBtnText = document.getElementById("uploadCsvBtnText");
+		this.uploadCsvSpinner = document.getElementById("uploadCsvSpinner");
+
 		// Local navigation and bbox elements
 		this.findCityBtn = document.getElementById("findCityBtn");
 		this.drawBboxBtn = document.getElementById("drawBboxBtn");
@@ -126,6 +132,14 @@ class PedestrianPredictionApp {
 		);
 		this.uploadGpkgBtn.addEventListener("click", () =>
 			this.handleGpkgUpload()
+		);
+
+		// CSV upload
+		this.csvFileInput.addEventListener("change", () =>
+			this.handleCsvFileSelection()
+		);
+		this.uploadCsvBtn.addEventListener("click", () =>
+			this.handleCsvUpload()
 		);
 
 		// Local navigation and bbox
@@ -365,6 +379,8 @@ class PedestrianPredictionApp {
 			} else if (btn.id === "sendBboxBtn" && !this.drawnBbox) {
 				btn.disabled = true;
 			} else if (btn.id === "uploadGpkgBtn" && !this.selectedFile) {
+				btn.disabled = true;
+			} else if (btn.id === "uploadCsvBtn" && !this.selectedCsvFile) {
 				btn.disabled = true;
 			} else {
 				btn.disabled = false;
@@ -853,6 +869,126 @@ class PedestrianPredictionApp {
 				this.uploadGpkgBtn,
 				this.uploadGpkgBtnText,
 				this.uploadGpkgSpinner,
+				false
+			);
+			this.setAppLoading(false);
+			this.stopProgressMonitoring();
+		}
+	}
+
+	// ============== CSV Upload Methods ==============
+
+	/**
+	 * Handle CSV file selection
+	 */
+	handleCsvFileSelection() {
+		const file = this.csvFileInput.files?.[0];
+		if (file) {
+			if (!file.name.toLowerCase().endsWith(".csv")) {
+				this.showStatusMessage("יש לבחור קובץ CSV", "error");
+				this.uploadCsvBtn.disabled = true;
+				return;
+			}
+
+			this.selectedCsvFile = file;
+			this.uploadCsvBtn.disabled = false;
+			this.showStatusMessage(`נבחר קובץ: ${file.name}`, "info");
+		} else {
+			this.selectedCsvFile = null;
+			this.uploadCsvBtn.disabled = true;
+		}
+	}
+
+	/**
+	 * Handle CSV file upload to server
+	 */
+	async handleCsvUpload() {
+		this.hideStatusMessage();
+		if (!this.selectedCsvFile) {
+			this.showStatusMessage("נא לבחור קובץ CSV", "error");
+			return;
+		}
+
+		if (this.isProcessing) {
+			this.showStatusMessage("מעבד בקשה קודמת, נא להמתין", "info");
+			return;
+		}
+
+		this.isProcessing = true;
+		this.setButtonLoading(
+			this.uploadCsvBtn,
+			this.uploadCsvBtnText,
+			this.uploadCsvSpinner,
+			true
+		);
+		this.setAppLoading(true);
+		this.startProgressMonitoring();
+
+		try {
+			const formData = new FormData();
+			formData.append("file", this.selectedCsvFile);
+
+			const response = await fetch(`${this.API_BASE_URL}/read-csv`, {
+				method: "POST",
+				body: formData,
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.error || `שגיאת שרת: ${response.status}`);
+			}
+
+			const result = await response.json();
+
+			// Process the returned geojson (CSV returns single layer)
+			if (result.success && result.geojson) {
+				const csvLayerName = this.selectedCsvFile.name.replace('.csv', '') + ' (חיזויים)';
+
+				this.allLayersData = [{
+					name: csvLayerName,
+					displayName: csvLayerName,
+					geojson: result.geojson,
+					metadata: {
+						featureCount: result.feature_count,
+						is_prediction_layer: true,
+					},
+				}];
+
+				this.displayLayerSelection(this.allLayersData);
+
+				// If bbox is available, fit map
+				if (result.bbox) {
+					const [west, south, east, north] = result.bbox;
+					this.map.fitBounds(
+						[
+							[south, west],
+							[north, east],
+						],
+						{
+							padding: [50, 50],
+							maxZoom: 15,
+						}
+					);
+				}
+
+				// Show prediction stats if available
+				if (result.prediction_stats) {
+					const stats = result.prediction_stats;
+					const msg = `עובד בהצלחה: ${stats.total_predictions} חיזויים (ביטחון ממוצע: ${(stats.average_confidence * 100).toFixed(1)}%)`;
+					this.showStatusMessage(msg, "success");
+				} else {
+					this.showStatusMessage("הקובץ עובד בהצלחה", "success");
+				}
+			}
+		} catch (error) {
+			console.error("CSV upload error:", error);
+			this.showStatusMessage(`שגיאה: ${error.message}`, "error");
+		} finally {
+			this.isProcessing = false;
+			this.setButtonLoading(
+				this.uploadCsvBtn,
+				this.uploadCsvBtnText,
+				this.uploadCsvSpinner,
 				false
 			);
 			this.setAppLoading(false);

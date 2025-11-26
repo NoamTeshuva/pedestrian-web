@@ -2697,6 +2697,246 @@ def _create_gpkg_response(updated_gdf: gpd.GeoDataFrame,
         "model_run": True
     }
 
+@app.route("/read-csv", methods=["POST"])
+def read_csv():
+    """
+    קבלת קובץ CSV, חילוץ מאפיינים, הרצת מודל, והחזרת תוצאות חיזוי חדשות.
+    CSV צריך להכיל geometry_wkt או centroid_lon/centroid_lat + את כל 15 המאפיינים.
+    מחזיר: { "success": bool, "geojson": FeatureCollection, "feature_count": int, "predictions": {...} }
+    """
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "missing file"}), 400
+
+        uploaded_file = request.files["file"]
+        if not uploaded_file.filename:
+            return jsonify({"error": "no file selected"}), 400
+
+        if not uploaded_file.filename.lower().endswith(".csv"):
+            return jsonify({"error": "only .csv files are accepted"}), 400
+
+        # יצירת קובץ זמני
+        fd, tmp_path = tempfile.mkstemp(suffix=".csv", dir=DATA_DIR)
+        os.close(fd)
+
+        try:
+            # שמירת הקובץ המועלה
+            uploaded_file.save(tmp_path)
+
+            # בדיקת תקינות הקובץ
+            if os.path.getsize(tmp_path) == 0:
+                return jsonify({"error": "uploaded file is empty"}), 400
+
+            # קריאת CSV
+            try:
+                df = pd.read_csv(tmp_path)
+                if df.empty:
+                    return jsonify({"error": "CSV file is empty"}), 400
+
+                logging.info(f"Read CSV with {len(df)} rows and columns: {list(df.columns)}")
+
+            except Exception as e:
+                logging.error(f"Failed to read CSV file: {e}")
+                return jsonify({"error": f"failed to read CSV file: {str(e)}"}), 400
+
+            # המרת CSV ל-GeoDataFrame
+            try:
+                from shapely import wkt
+
+                # אם יש עמודת geometry_wkt - המר אותה לגיאומטריה
+                if 'geometry_wkt' in df.columns:
+                    logging.info("Converting geometry_wkt to geometry")
+                    df['geometry'] = df['geometry_wkt'].apply(lambda x: wkt.loads(x) if pd.notna(x) and x else None)
+
+                # אם יש centroid_lon/lat אבל לא geometry - צור point geometry
+                elif 'centroid_lon' in df.columns and 'centroid_lat' in df.columns:
+                    from shapely.geometry import Point, LineString
+                    logging.info("Creating geometry from centroid coordinates")
+
+                    # נסה לזהות אם יש עמודות של קצוות (u_x, u_y, v_x, v_y)
+                    if all(col in df.columns for col in ['u_x', 'u_y', 'v_x', 'v_y']):
+                        # צור LineString מקצוות
+                        df['geometry'] = df.apply(
+                            lambda row: LineString([(row['u_x'], row['u_y']), (row['v_x'], row['v_y'])])
+                            if all(pd.notna([row['u_x'], row['u_y'], row['v_x'], row['v_y']])) else None,
+                            axis=1
+                        )
+                    else:
+                        # צור Point מ-centroid
+                        df['geometry'] = df.apply(
+                            lambda row: Point(row['centroid_lon'], row['centroid_lat'])
+                            if pd.notna(row['centroid_lon']) and pd.notna(row['centroid_lat']) else None,
+                            axis=1
+                        )
+                else:
+                    return jsonify({"error": "CSV must contain either 'geometry_wkt' or 'centroid_lon'/'centroid_lat' columns"}), 400
+
+                # צור GeoDataFrame
+                gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+
+                # הסר שורות ללא גיאומטריה
+                gdf = gdf[gdf.geometry.notnull()].copy()
+
+                if gdf.empty:
+                    return jsonify({"error": "No valid geometries found in CSV"}), 400
+
+                logging.info(f"Created GeoDataFrame with {len(gdf)} features")
+
+            except Exception as e:
+                logging.error(f"Failed to convert CSV to GeoDataFrame: {e}")
+                return jsonify({"error": f"failed to convert CSV to GeoDataFrame: {str(e)}"}), 400
+
+            # בדיקת עמודות נדרשות (אותן עמודות כמו GPKG)
+            required_mapping = {
+                'edge_id': ['edge_id', 'EdgeID', 'EDGE_ID', 'u'],
+                'osmid': ['osmid', 'OSMID', 'osm_id', 'OSM_ID'],
+                'highway': ['highway', 'Highway', 'HIGHWAY'],
+                'land_use': ['land_use', 'landuse', 'LAND_USE', 'LANDUSE'],
+                'length': ['length', 'Length', 'LENGTH'],
+                'betweenness': ['betweenness', 'Betweenness', 'BETWEENNESS'],
+                'closeness': ['closeness', 'Closeness', 'CLOSENESS'],
+                'search_hour': ['search_hour', 'Hour', 'HOUR', 'hour'],
+                'search_is_weekend': ['search_is_weekend', 'is_weekend', 'IS_WEEKEND', 'weekend'],
+                'search_time_of_day': ['search_time_of_day', 'time_of_day', 'TIME_OF_DAY', 'timeofday']
+            }
+
+            # בדיקה כמה עמודות נמצאו
+            found_cols = {}
+            missing_cols = []
+
+            for required_col, possible_names in required_mapping.items():
+                found = False
+                for possible_name in possible_names:
+                    if possible_name in gdf.columns:
+                        found_cols[required_col] = possible_name
+                        found = True
+                        break
+                if not found:
+                    missing_cols.append(required_col)
+
+            logging.info(f"Found {len(found_cols)}/{len(required_mapping)} required columns")
+            logging.info(f"Found columns mapping: {found_cols}")
+            if missing_cols:
+                logging.info(f"Missing columns: {missing_cols}")
+
+            # וידוא שיש את העמודות החיוניות
+            essential_cols = ['osmid', 'highway', 'land_use', 'length', 'betweenness', 'closeness']
+            found_essential = [col for col in essential_cols if col in found_cols]
+
+            if len(found_essential) < 6:
+                error_msg = f"CSV missing essential columns. Found {len(found_essential)}/6 essential columns. "
+                error_msg += f"Missing: {[col for col in essential_cols if col not in found_cols]}"
+                return jsonify({"error": error_msg}), 400
+
+            # יצירת edge_id אם חסר
+            if 'edge_id' not in found_cols and 'u' in gdf.columns:
+                if 'v' in gdf.columns and 'key' in gdf.columns:
+                    gdf['edge_id'] = gdf['u'].astype(str) + '_' + gdf['v'].astype(str) + '_' + gdf['key'].astype(str)
+                else:
+                    gdf['edge_id'] = gdf['u'].astype(str) + '_' + gdf.index.astype(str)
+                found_cols['edge_id'] = 'edge_id'
+                logging.info(f"Created edge_id from u, v, key columns")
+
+            # שמירת המיפוי של העמודות
+            gdf._column_mapping = found_cols
+
+            # הכנת נתונים למודל
+            model_ready_data = _prepare_gpkg_data_for_model(gdf)
+
+            if model_ready_data.empty:
+                return jsonify({"error": "no valid data for model prediction"}), 400
+
+            # בדיקה שהמודל זמין
+            if model is None:
+                return jsonify({"error": "Model not available"}), 503
+
+            # הרצת מודל
+            logging.info(f"Running model prediction for {len(model_ready_data)} edges from CSV")
+
+            # הכנת נתונים למודל CatBoost
+            cat_feature_indices = [model_ready_data.columns.get_loc(col)
+                                 for col in CAT_COLS if col in model_ready_data.columns]
+
+            # וידוא שעמודות קטגוריות הן strings
+            for col in CAT_COLS:
+                if col in model_ready_data.columns:
+                    model_ready_data[col] = model_ready_data[col].astype(str)
+
+            # יצירת Pool והרצת חיזוי
+            pool = Pool(model_ready_data, cat_features=cat_feature_indices)
+            predictions = model.predict(pool)
+            probabilities = model.predict_proba(pool)
+
+            # עדכון ה-GeoDataFrame עם תוצאות חדשות
+            updated_gdf = _update_gdf_with_predictions(gdf, predictions, probabilities)
+
+            # וידוא CRS
+            if updated_gdf.crs is None:
+                updated_gdf = updated_gdf.set_crs(4326, allow_override=True)
+            elif str(updated_gdf.crs).upper() != "EPSG:4326":
+                updated_gdf = updated_gdf.to_crs(4326)
+
+            # הגבלת גודל
+            if len(updated_gdf) > 20000:
+                logging.info(f"Sampling CSV from {len(updated_gdf)} to 20000 features")
+                updated_gdf = updated_gdf.sample(20000, random_state=1)
+
+            # ניקוי גיאומטריות
+            updated_gdf = updated_gdf[updated_gdf.geometry.notnull() & ~updated_gdf.geometry.is_empty].copy()
+
+            if updated_gdf.empty:
+                return jsonify({"error": "No valid geometries after processing"}), 400
+
+            # יצירת GeoJSON נקי
+            gj = clean_geojson(updated_gdf.__geo_interface__)
+
+            # חישוב bbox
+            try:
+                bounds = updated_gdf.total_bounds
+                bbox = [float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])]
+            except Exception as e:
+                logging.warning(f"Failed to calculate bounds: {e}")
+                bbox = None
+
+            # סטטיסטיקות חיזוי
+            prediction_stats = {
+                "total_predictions": int(len(predictions)),
+                "class_distribution": {
+                    str(i+1): int((predictions == i).sum())
+                    for i in range(5)
+                },
+                "average_confidence": float(probabilities.max(axis=1).mean()) if probabilities.ndim > 1 else float(probabilities.mean())
+            }
+
+            response_data = {
+                "success": True,
+                "geojson": gj,
+                "bbox": bbox,
+                "feature_count": int(len(updated_gdf)),
+                "prediction_stats": prediction_stats,
+                "model_run": True
+            }
+
+            logging.info(f"Successfully processed CSV and ran predictions for {len(predictions)} edges")
+
+            return jsonify(response_data)
+
+        except Exception as e:
+            logging.error(f"Error processing CSV file: {e}")
+            return jsonify({"error": f"failed to process CSV file: {str(e)}"}), 500
+
+        finally:
+            # ניקוי הקובץ הזמני
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logging.error(f"read-csv endpoint failed: {e}")
+        return jsonify({"error": f"internal server error: {str(e)}"}), 500
+
+
 def build_search_timestamp(season: str, week_type: str, time_of_day: str) -> datetime:
     """
     Build a representative datetime for given season, week type, and time of day.
