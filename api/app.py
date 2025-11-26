@@ -2312,7 +2312,33 @@ def read_gpkg():
             for layer_name in spatial_layers:
                 try:
                     logging.info(f"Attempting to read layer: {layer_name}")
-                    gdf = gpd.read_file(tmp_path, layer=layer_name)
+
+                    # Workaround for fiona.path AttributeError in newer Fiona versions
+                    # Use fiona directly with proper context management instead of gpd.read_file
+                    try:
+                        # Read layer with fiona directly (shape is already imported at module level)
+                        with fiona.open(tmp_path, layer=layer_name) as src:
+                            # Extract features and convert to GeoDataFrame
+                            features = []
+                            for feature in src:
+                                # Convert fiona feature to dict with geometry
+                                props = feature['properties']
+                                geom = shape(feature['geometry'])
+                                props['geometry'] = geom
+                                features.append(props)
+
+                            if not features:
+                                logging.warning(f"Layer {layer_name} is empty")
+                                continue
+
+                            # Create GeoDataFrame from features
+                            gdf = gpd.GeoDataFrame(features, crs=src.crs)
+                            logging.info(f"Successfully read layer {layer_name} with {len(gdf)} features")
+
+                    except Exception as fiona_error:
+                        # Fallback to gpd.read_file if fiona direct read fails
+                        logging.warning(f"Fiona direct read failed, trying gpd.read_file: {fiona_error}")
+                        gdf = gpd.read_file(tmp_path, layer=layer_name)
                     
                     # לוג את העמודות הזמינות
                     logging.info(f"Layer '{layer_name}' columns: {list(gdf.columns)}")
