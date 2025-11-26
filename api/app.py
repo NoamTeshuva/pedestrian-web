@@ -33,9 +33,9 @@ import osmnx as ox
 #
 # Solution: Set HUGE value to disable subdivision completely for all reasonable bbox sizes
 # IMPORTANT: In OSMnx v2, max_query_area_size is in SQUARE METERS, not square degrees!
-# Default is 2,500,000,000 m² (2,500 km²) = ~50km × 50km
-# Setting to 10 billion m² = 10,000 km² = 100km × 100km to handle large areas without subdivision
-ox.settings.max_query_area_size = 10_000_000_000  # 10 billion m² = 100km × 100km
+# Default is 2,500,000,000 m^2 (~50km x 50km)
+# Setting to 50 billion m^2 to minimize subdivision
+ox.settings.max_query_area_size = 50_000_000_000  # 50 billion m^2 = ~223km x 223km
 
 # Optimize OSMnx for faster downloads
 # CRITICAL: OSMnx v2 uses 'requests_timeout' not 'timeout' (deprecated)
@@ -53,7 +53,7 @@ ox.settings.overpass_rate_limit = False  # Disable automatic rate limit detectio
 ox.settings.useful_tags_way = ['highway', 'name', 'length']
 
 # Use stderr for unbuffered output in Gunicorn
-sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size / 1_000_000:.0f} km² ({ox.settings.max_query_area_size:,.0f} m²)\n")
+sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size / 1_000_000:.0f} km^2 ({ox.settings.max_query_area_size:,.0f} m^2)\n")
 sys.stderr.write(f"[STARTUP] Configured OSMnx requests_timeout: {ox.settings.requests_timeout}s, overpass_memory: {ox.settings.overpass_memory / 1024**3:.1f}GB\n")
 sys.stderr.flush()
 
