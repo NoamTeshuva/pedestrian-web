@@ -2282,7 +2282,7 @@ def read_gpkg():
                 layers = fiona.listlayers(tmp_path)
                 if not layers:
                     return jsonify({"error": "no layers found in GPKG file"}), 400
-                    
+
             except Exception as e:
                 logging.error(f"Failed to read GPKG layers: {e}")
                 return jsonify({"error": f"failed to read GPKG file: {str(e)}"}), 400
@@ -2290,9 +2290,28 @@ def read_gpkg():
             # חיפוש שכבה עם נתוני חיזוי (בדרך כלל "predictions")
             prediction_layer = None
             prediction_gdf = None
-            
-            for layer_name in layers:
+
+            # Filter out non-spatial layers (QGIS styles, etc.)
+            # These layers cause compatibility issues with Fiona/geopandas
+            non_spatial_layers = ['layer_styles', 'qgis_projects', 'rtree_', 'gpkg_']
+            spatial_layers = []
+            for layer in layers:
+                # Skip if layer name matches non-spatial patterns
+                if layer.lower() in [l.lower() for l in non_spatial_layers]:
+                    continue
+                # Skip if layer name starts with internal GPKG prefixes
+                if any(layer.lower().startswith(prefix) for prefix in ['rtree_', 'gpkg_']):
+                    continue
+                spatial_layers.append(layer)
+
+            logging.info(f"Found {len(layers)} total layers, {len(spatial_layers)} spatial layers to process: {spatial_layers}")
+            if len(spatial_layers) < len(layers):
+                skipped = [l for l in layers if l not in spatial_layers]
+                logging.info(f"Skipping {len(skipped)} non-spatial/internal layers: {skipped}")
+
+            for layer_name in spatial_layers:
                 try:
+                    logging.info(f"Attempting to read layer: {layer_name}")
                     gdf = gpd.read_file(tmp_path, layer=layer_name)
                     
                     # לוג את העמודות הזמינות
@@ -2355,11 +2374,18 @@ def read_gpkg():
                         break
                         
                 except Exception as e:
-                    logging.warning(f"Error reading layer {layer_name}: {e}")
+                    # Log the error but continue to try other layers
+                    error_type = type(e).__name__
+                    logging.warning(f"Error reading layer {layer_name} ({error_type}): {str(e)[:100]}")
                     continue
-            
+
             if prediction_gdf is None or prediction_gdf.empty:
-                return jsonify({"error": "no valid prediction layer found with required columns"}), 400
+                error_msg = f"No valid prediction layer found with required columns. "
+                error_msg += f"Checked {len(spatial_layers)} layers"
+                if len(layers) > len(spatial_layers):
+                    error_msg += f" (skipped {len(layers) - len(spatial_layers)} non-spatial layers)"
+                logging.error(error_msg)
+                return jsonify({"error": error_msg}), 400
 
             # הכנת נתונים למודל
             model_ready_data = _prepare_gpkg_data_for_model(prediction_gdf)
