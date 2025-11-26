@@ -1201,6 +1201,7 @@ class PedestrianPredictionApp {
 
 		// Add individual layer buttons
 		layers.forEach((layer) => {
+			if (layer.name === 'average') return;
 			const button = document.createElement("button");
 			button.className = "layer-btn";
 			button.textContent = layer.displayName;
