@@ -2975,248 +2975,400 @@ def build_search_timestamp(season: str, week_type: str, time_of_day: str) -> dat
 
     return datetime(base_date.year, base_date.month, base_date.day, hour, 0, 0)
 
-def calculate_average_layer(layers):
-    """
-    Calculate average layer from multiple prediction layers.
+# def calculate_average_layer(layers):
+#     """
+#     Calculate average layer from multiple prediction layers.
     
-    For each street, this function:
-    1. Creates 5 variables (one for each volume class probability)
-    2. Sums up all probabilities from all 32 combinations (4 seasons × 2 week types × 4 times of day)
-    3. Divides each sum by 32 to get the annual average probability
-    4. The volume class with the highest average probability becomes the street's predicted volume
-    5. The street is colored according to this predicted volume class
+#     For each street, this function:
+#     1. Creates 5 variables (one for each volume class probability)
+#     2. Sums up all probabilities from all 32 combinations (4 seasons × 2 week types × 4 times of day)
+#     3. Divides each sum by 32 to get the annual average probability
+#     4. The volume class with the highest average probability becomes the street's predicted volume
+#     5. The street is colored according to this predicted volume class
     
-    Args:
-        layers: list of layer dicts with {name, geojson, feature_count}
+#     Args:
+#         layers: list of layer dicts with {name, geojson, feature_count}
     
-    Returns:
-        dict: average layer with averaged probabilities and predicted class
-    """
-    if not layers or len(layers) < 2:
-        return None
+#     Returns:
+#         dict: average layer with averaged probabilities and predicted class
+#     """
+#     if not layers or len(layers) < 2:
+#         return None
     
-    try:
-        # DEBUG: Log layer structure
-        logging.info(f"[AVERAGE] Processing {len(layers)} layers for average calculation")
-        for idx, layer in enumerate(layers):
-            feature_count = len(layer.get('geojson', {}).get('features', []))
-            logging.info(f"[AVERAGE] Layer {idx} ({layer.get('name')}): {feature_count} features")
+#     try:
+#         # DEBUG: Log layer structure
+#         logging.info(f"[AVERAGE] Processing {len(layers)} layers for average calculation")
+#         for idx, layer in enumerate(layers):
+#             feature_count = len(layer.get('geojson', {}).get('features', []))
+#             logging.info(f"[AVERAGE] Layer {idx} ({layer.get('name')}): {feature_count} features")
             
-            # Sample first feature to see osmid format
-            if feature_count > 0:
-                first_feature = layer['geojson']['features'][0]
-                osmid = first_feature.get('properties', {}).get('osmid')
-                edge_id = first_feature.get('properties', {}).get('edge_id')
-                logging.info(f"[AVERAGE] Sample osmid type: {type(osmid)}, value: {osmid}")
-                logging.info(f"[AVERAGE] Sample edge_id type: {type(edge_id)}, value: {edge_id}")
-        # Get the first layer as base structure
-        base_layer = layers[0]
-        if not base_layer.get('geojson') or not base_layer['geojson'].get('features'):
-            return None
+#             # Sample first feature to see osmid format
+#             if feature_count > 0:
+#                 first_feature = layer['geojson']['features'][0]
+#                 osmid = first_feature.get('properties', {}).get('osmid')
+#                 edge_id = first_feature.get('properties', {}).get('edge_id')
+#                 logging.info(f"[AVERAGE] Sample osmid type: {type(osmid)}, value: {osmid}")
+#                 logging.info(f"[AVERAGE] Sample edge_id type: {type(edge_id)}, value: {edge_id}")
+#         # Get the first layer as base structure
+#         base_layer = layers[0]
+#         if not base_layer.get('geojson') or not base_layer['geojson'].get('features'):
+#             return None
         
-        # Create a map to store probability sums and counts for each feature
-        feature_averages = {}
+#         # Create a map to store probability sums and counts for each feature
+#         feature_averages = {}
         
-        # # Process each layer
-        # for layer in layers:
-        #     if not layer.get('geojson') or not layer['geojson'].get('features'):
-        #         continue
-        #     seen_ids = set()
-        #     unique_features = []
+#         # # Process each layer
+#         # for layer in layers:
+#         #     if not layer.get('geojson') or not layer['geojson'].get('features'):
+#         #         continue
+#         #     seen_ids = set()
+#         #     unique_features = []
                 
-        #     for feature in layer['geojson']['features']:
-        #         # Helper function to normalize IDs
-        #         def normalize_id(id_value):
-        #             """Convert ID to consistent format for matching."""
-        #             if id_value is None:
-        #                 return None
-        #             if isinstance(id_value, str) and ',' in id_value:
-        #                 # String with comma-separated values - convert to tuple of ints
-        #                 try:
-        #                     return tuple(map(int, id_value.split(',')))
-        #                 except:
-        #                     return id_value
-        #             if isinstance(id_value, list):
-        #                 return tuple(id_value)
-        #             if isinstance(id_value, tuple):
-        #                 return id_value
-        #             return id_value
+#         #     for feature in layer['geojson']['features']:
+#         #         # Helper function to normalize IDs
+#         #         def normalize_id(id_value):
+#         #             """Convert ID to consistent format for matching."""
+#         #             if id_value is None:
+#         #                 return None
+#         #             if isinstance(id_value, str) and ',' in id_value:
+#         #                 # String with comma-separated values - convert to tuple of ints
+#         #                 try:
+#         #                     return tuple(map(int, id_value.split(',')))
+#         #                 except:
+#         #                     return id_value
+#         #             if isinstance(id_value, list):
+#         #                 return tuple(id_value)
+#         #             if isinstance(id_value, tuple):
+#         #                 return id_value
+#         #             return id_value
                 
-        #         # Use osmid, edge_id, or geometry as unique identifier
-        #         osmid = feature.get('properties', {}).get('osmid')
-        #         edge_id = feature.get('properties', {}).get('edge_id')
+#         #         # Use osmid, edge_id, or geometry as unique identifier
+#         #         osmid = feature.get('properties', {}).get('osmid')
+#         #         edge_id = feature.get('properties', {}).get('edge_id')
 
-        #         if osmid is not None:
-        #             feature_id = normalize_id(osmid)
-        #         elif edge_id is not None:
-        #             feature_id = normalize_id(edge_id)
-        #         else:
-        #             feature_id = str(feature.get('geometry', {}))
+#         #         if osmid is not None:
+#         #             feature_id = normalize_id(osmid)
+#         #         elif edge_id is not None:
+#         #             feature_id = normalize_id(edge_id)
+#         #         else:
+#         #             feature_id = str(feature.get('geometry', {}))
                 
-        #         if feature_id not in feature_averages:
-        #             feature_averages[feature_id] = {
-        #                 'geometry': feature.get('geometry'),
-        #                 'properties': feature.get('properties', {}).copy(),
-        #                 'probability_sums': [0.0] * 5,  # For classes 1-5
-        #                 'count': 0
-        #             }
+#         #         if feature_id not in feature_averages:
+#         #             feature_averages[feature_id] = {
+#         #                 'geometry': feature.get('geometry'),
+#         #                 'properties': feature.get('properties', {}).copy(),
+#         #                 'probability_sums': [0.0] * 5,  # For classes 1-5
+#         #                 'count': 0
+#         #             }
                 
-        #         avg_data = feature_averages[feature_id]
+#         #         avg_data = feature_averages[feature_id]
                 
-        #         # Sum probabilities for each class (1-5)
-        #         for i in range(1, 6):
-        #             prob = feature.get('properties', {}).get(f'proba_{i}')
-        #             if prob is not None:
-        #                 avg_data['probability_sums'][i-1] += float(prob)
+#         #         # Sum probabilities for each class (1-5)
+#         #         for i in range(1, 6):
+#         #             prob = feature.get('properties', {}).get(f'proba_{i}')
+#         #             if prob is not None:
+#         #                 avg_data['probability_sums'][i-1] += float(prob)
                 
-        #         avg_data['count'] += 1
+#         #         avg_data['count'] += 1
 
-# Helper function to normalize IDs
-        def normalize_id(id_value):
-            """Convert ID to consistent format for matching."""
-            if id_value is None:
-                return None
-            if isinstance(id_value, str) and ',' in id_value:
-                # String with comma-separated values - convert to tuple of ints
-                try:
-                    return tuple(map(int, id_value.split(',')))
-                except:
-                    return id_value
-            if isinstance(id_value, list):
-                return tuple(id_value)
-            if isinstance(id_value, tuple):
-                return id_value
-            return id_value
-        # Process each layer
-        for layer in layers:
-            if not layer.get('geojson') or not layer['geojson'].get('features'):
-                continue
+# # Helper function to normalize IDs
+#         def normalize_id(id_value):
+#             """Convert ID to consistent format for matching."""
+#             if id_value is None:
+#                 return None
+#             if isinstance(id_value, str) and ',' in id_value:
+#                 # String with comma-separated values - convert to tuple of ints
+#                 try:
+#                     return tuple(map(int, id_value.split(',')))
+#                 except:
+#                     return id_value
+#             if isinstance(id_value, list):
+#                 return tuple(id_value)
+#             if isinstance(id_value, tuple):
+#                 return id_value
+#             return id_value
+#         # Process each layer
+#         for layer in layers:
+#             if not layer.get('geojson') or not layer['geojson'].get('features'):
+#                 continue
             
-            # CRITICAL FIX: Remove duplicate features by osmid before processing
-            seen_ids = set()
-            unique_features = []
-            original_count = len(layer['geojson']['features'])
+#             # CRITICAL FIX: Remove duplicate features by osmid before processing
+#             seen_ids = set()
+#             unique_features = []
+#             original_count = len(layer['geojson']['features'])
             
-            for feature in layer['geojson']['features']:
-                osmid = feature.get('properties', {}).get('osmid')
+#             for feature in layer['geojson']['features']:
+#                 osmid = feature.get('properties', {}).get('osmid')
                 
-                # Create unique key
-                if osmid is not None:
-                    if isinstance(osmid, list):
-                        feat_key = tuple(osmid)
-                    else:
-                        feat_key = osmid
-                else:
-                    feat_key = str(feature.get('geometry', {}))
+#                 # Create unique key
+#                 if osmid is not None:
+#                     if isinstance(osmid, list):
+#                         feat_key = tuple(osmid)
+#                     else:
+#                         feat_key = osmid
+#                 else:
+#                     feat_key = str(feature.get('geometry', {}))
                 
-                # Skip duplicates
-                if feat_key in seen_ids:
-                    continue
+#                 # Skip duplicates
+#                 if feat_key in seen_ids:
+#                     continue
                     
-                seen_ids.add(feat_key)
-                unique_features.append(feature)
+#                 seen_ids.add(feat_key)
+#                 unique_features.append(feature)
             
-            # Log if duplicates were removed
-            if len(unique_features) < original_count:
-                logging.warning(f"[AVERAGE] Layer {layer.get('name')}: removed {original_count - len(unique_features)} duplicates")
+#             # Log if duplicates were removed
+#             if len(unique_features) < original_count:
+#                 logging.warning(f"[AVERAGE] Layer {layer.get('name')}: removed {original_count - len(unique_features)} duplicates")
             
-            # Now process UNIQUE features only (שים לב לשינוי כאן!)
-            for feature in unique_features:                
-                # Use osmid, edge_id, or geometry as unique identifier
-                osmid = feature.get('properties', {}).get('osmid')
-                edge_id = feature.get('properties', {}).get('edge_id')
+#             # Now process UNIQUE features only (שים לב לשינוי כאן!)
+#             for feature in unique_features:                
+#                 # Use osmid, edge_id, or geometry as unique identifier
+#                 osmid = feature.get('properties', {}).get('osmid')
+#                 edge_id = feature.get('properties', {}).get('edge_id')
 
-                if osmid is not None:
-                    feature_id = normalize_id(osmid)
-                elif edge_id is not None:
-                    feature_id = normalize_id(edge_id)
-                else:
-                    feature_id = str(feature.get('geometry', {}))
+#                 if osmid is not None:
+#                     feature_id = normalize_id(osmid)
+#                 elif edge_id is not None:
+#                     feature_id = normalize_id(edge_id)
+#                 else:
+#                     feature_id = str(feature.get('geometry', {}))
                 
-                if feature_id not in feature_averages:
-                    feature_averages[feature_id] = {
-                        'geometry': feature.get('geometry'),
-                        'properties': feature.get('properties', {}).copy(),
-                        'probability_sums': [0.0] * 5,  # For classes 1-5
-                        'count': 0
-                    }
+#                 if feature_id not in feature_averages:
+#                     feature_averages[feature_id] = {
+#                         'geometry': feature.get('geometry'),
+#                         'properties': feature.get('properties', {}).copy(),
+#                         'probability_sums': [0.0] * 5,  # For classes 1-5
+#                         'count': 0
+#                     }
                 
-                avg_data = feature_averages[feature_id]
+#                 avg_data = feature_averages[feature_id]
                 
-                # Sum probabilities for each class (1-5)
-                for i in range(1, 6):
-                    prob = feature.get('properties', {}).get(f'proba_{i}')
-                    if prob is not None:
-                        avg_data['probability_sums'][i-1] += float(prob)
+#                 # Sum probabilities for each class (1-5)
+#                 for i in range(1, 6):
+#                     prob = feature.get('properties', {}).get(f'proba_{i}')
+#                     if prob is not None:
+#                         avg_data['probability_sums'][i-1] += float(prob)
                 
-                avg_data['count'] += 1
+#                 avg_data['count'] += 1
 
-        # Create average features
-        average_features = []
-        for feature_id, avg_data in feature_averages.items():
-            if avg_data['count'] == 0:
-                continue
+#         # Create average features
+#         average_features = []
+#         for feature_id, avg_data in feature_averages.items():
+#             if avg_data['count'] == 0:
+#                 continue
 
-            # Calculate average probabilities - divide by actual count of layers
-            # This ensures streets that appear in fewer layers are averaged correctly
-            # (not all streets appear in all 32 possible combinations)
-            avg_probs = [sum_val / float(avg_data['count']) for sum_val in avg_data['probability_sums']]
+#             # Calculate average probabilities - divide by actual count of layers
+#             # This ensures streets that appear in fewer layers are averaged correctly
+#             # (not all streets appear in all 32 possible combinations)
+#             avg_probs = [sum_val / float(avg_data['count']) for sum_val in avg_data['probability_sums']]
             
-            # Find the class with highest average probability
-            max_prob = max(avg_probs)
-            predicted_class = avg_probs.index(max_prob) + 1
+#             # Find the class with highest average probability
+#             max_prob = max(avg_probs)
+#             predicted_class = avg_probs.index(max_prob) + 1
             
-            # Create properties with average probabilities
-            properties = avg_data['properties'].copy()
-            properties['volume_bin'] = predicted_class
-            properties['volume_class'] = predicted_class
+#             # Create properties with average probabilities
+#             properties = avg_data['properties'].copy()
+#             properties['volume_bin'] = predicted_class
+#             properties['volume_class'] = predicted_class
 
-            # Add average probabilities
-            for i in range(1, 6):
-                properties[f'proba_{i}'] = avg_probs[i-1]
-            properties['proba_top'] = max_prob
+#             # Add average probabilities
+#             for i in range(1, 6):
+#                 properties[f'proba_{i}'] = avg_probs[i-1]
+#             properties['proba_top'] = max_prob
 
-            # Mark as average layer and include metadata
-            properties['is_average_layer'] = True
-            properties['layer_count'] = avg_data['count']  # How many layers this street appeared in
+#             # Mark as average layer and include metadata
+#             properties['is_average_layer'] = True
+#             properties['layer_count'] = avg_data['count']  # How many layers this street appeared in
             
-            average_features.append({
-                'type': 'Feature',
-                'geometry': avg_data['geometry'],
-                'properties': properties
-            })
+#             average_features.append({
+#                 'type': 'Feature',
+#                 'geometry': avg_data['geometry'],
+#                 'properties': properties
+#             })
 
-        # DEBUG: Log matching statistics
-        total_streets_in_layers = {}
-        for layer in layers:
-            for feature in layer.get('geojson', {}).get('features', []):
-                osmid = feature.get('properties', {}).get('osmid')
-                if osmid:
-                    if isinstance(osmid, list):
-                        osmid = tuple(osmid)
-                    total_streets_in_layers[osmid] = total_streets_in_layers.get(osmid, 0) + 1
+#         # DEBUG: Log matching statistics
+#         total_streets_in_layers = {}
+#         for layer in layers:
+#             for feature in layer.get('geojson', {}).get('features', []):
+#                 osmid = feature.get('properties', {}).get('osmid')
+#                 if osmid:
+#                     if isinstance(osmid, list):
+#                         osmid = tuple(osmid)
+#                     total_streets_in_layers[osmid] = total_streets_in_layers.get(osmid, 0) + 1
             
-        logging.info(f"[AVERAGE] Total unique streets across all layers: {len(total_streets_in_layers)}")
-        logging.info(f"[AVERAGE] Streets in average layer: {len(average_features)}")
-        logging.info(f"[AVERAGE] Missing streets: {len(total_streets_in_layers) - len(average_features)}")       
+#         logging.info(f"[AVERAGE] Total unique streets across all layers: {len(total_streets_in_layers)}")
+#         logging.info(f"[AVERAGE] Streets in average layer: {len(average_features)}")
+#         logging.info(f"[AVERAGE] Missing streets: {len(total_streets_in_layers) - len(average_features)}")       
         
-        # Create average layer
-        average_geojson = {
-            'type': 'FeatureCollection',
-            'features': average_features
-        }
+#         # Create average layer
+#         average_geojson = {
+#             'type': 'FeatureCollection',
+#             'features': average_features
+#         }
         
-        return {
-            'name': 'average',
-            'geojson': clean_geojson(average_geojson),
-            'feature_count': len(average_features),
-            'is_prediction_layer': True,
-            'is_average_layer': True
-        }
+#         return {
+#             'name': 'average',
+#             'geojson': clean_geojson(average_geojson),
+#             'feature_count': len(average_features),
+#             'is_prediction_layer': True,
+#             'is_average_layer': True
+#         }
         
-    except Exception as e:
-        logging.error(f"Error calculating average layer: {e}")
+#     except Exception as e:
+#         logging.error(f"Error calculating average layer: {e}")
+#         return None
+
+def calculate_average_layer(layers):
+    """Calculate annual average prediction layer from multiple seasonal layers.
+
+    This version:
+    1. מנרמל מזהי רחובות (osmid / edge_id) כדי שתהיה התאמה בין שכבות שונות.
+    2. מחשב ממוצע גם אם רחוב לא מופיע בכל השכבות, כל עוד יש לו לפחות חיזוי אחד.
+    """
+    import logging
+
+    if not layers:
         return None
+
+    # בוחרים שכבה ראשונה לא ריקה כבסיס
+    base_layer = None
+    for layer in layers:
+        if layer.get("geojson") and layer["geojson"].get("features"):
+            base_layer = layer
+            break
+    if base_layer is None:
+        return None
+
+    # ✔ פתרון 2 – פונקציה שמנרמלת מזהי רחוב
+    def normalize_id(id_value):
+        if id_value is None:
+            return None
+        # list / tuple → tuple
+        if isinstance(id_value, list):
+            return tuple(id_value)
+        if isinstance(id_value, tuple):
+            return id_value
+        # string כמו "123,456" → tuple של מספרים
+        if isinstance(id_value, str) and "," in id_value:
+            try:
+                return tuple(int(x) for x in id_value.split(","))
+            except Exception:
+                return id_value
+        # float שהוא בעצם int → int
+        if isinstance(id_value, float) and id_value.is_integer():
+            return int(id_value)
+        return id_value
+
+    # מילון: street_id → אגרגציה
+    feature_aggregates = {}
+
+    for layer in layers:
+        geojson = layer.get("geojson")
+        if not geojson or not geojson.get("features"):
+            continue
+
+        seen_ids = set()
+        unique_features = []
+        original_count = len(geojson["features"])
+
+        # מסירים כפילויות בתוך כל שכבה
+        for feature in geojson["features"]:
+            props = feature.get("properties", {}) or {}
+            osmid = normalize_id(props.get("osmid"))
+            edge_id = normalize_id(props.get("edge_id"))
+
+            if osmid is not None:
+                feat_key = ("osmid", osmid)
+            elif edge_id is not None:
+                feat_key = ("edge_id", edge_id)
+            else:
+                feat_key = ("geom", str(feature.get("geometry", {})))
+
+            if feat_key in seen_ids:
+                continue
+            seen_ids.add(feat_key)
+            unique_features.append(feature)
+
+        if len(unique_features) < original_count:
+            logging.warning(
+                f"[AVERAGE] Layer {layer.get('name')} – removed "
+                f"{original_count - len(unique_features)} duplicate features"
+            )
+
+        # אוספים הסתברויות לכל רחוב
+        for feature in unique_features:
+            props = feature.get("properties", {}) or {}
+            osmid = normalize_id(props.get("osmid"))
+            edge_id = normalize_id(props.get("edge_id"))
+
+            if osmid is not None:
+                feature_id = ("osmid", osmid)
+            elif edge_id is not None:
+                feature_id = ("edge_id", edge_id)
+            else:
+                feature_id = ("geom", str(feature.get("geometry", {})))
+
+            agg = feature_aggregates.get(feature_id)
+            if agg is None:
+                agg = {
+                    "geometry": feature.get("geometry"),
+                    "properties": props.copy(),
+                    "probability_sums": [0.0] * 5,  # מחלקות 1-5
+                    "count": 0,
+                }
+                feature_aggregates[feature_id] = agg
+
+            # ✔ פתרון 1 – להשתמש בכל חיזוי קיים, אם יש
+            for i in range(1, 6):
+                prob = props.get(f"proba_{i}")
+                if prob is not None:
+                    agg["probability_sums"][i - 1] += float(prob)
+
+            # נספור שכבה רק אם הייתה לפחות הסתברות אחת לרחוב הזה
+            if any(props.get(f"proba_{i}") is not None for i in range(1, 6)):
+                agg["count"] += 1
+
+    # בונים פיצ'רים ממוצעים
+    average_features = []
+    for feature_id, agg in feature_aggregates.items():
+        if agg["count"] == 0:
+            # לא הייתה אף שכבה עם תחזית לרחוב הזה
+            continue
+
+        avg_probs = [s / agg["count"] for s in agg["probability_sums"]]
+        max_prob = max(avg_probs)
+        best_class = avg_probs.index(max_prob) + 1
+
+        props = agg["properties"].copy()
+        props["volume_bin"] = int(best_class)
+        props["proba_top"] = float(max_prob)
+        for i in range(1, 6):
+            props[f"proba_{i}"] = float(avg_probs[i - 1])
+
+        props["is_average_layer"] = True
+        props["layer_count"] = agg["count"]
+
+        average_features.append(
+            {
+                "type": "Feature",
+                "geometry": agg["geometry"],
+                "properties": props,
+            }
+        )
+
+    if not average_features:
+        logging.warning("[AVERAGE] No streets ended up in the average layer")
+        return None
+
+    return {
+        "name": "שכבה ממוצעת",
+        "geojson": {"type": "FeatureCollection", "features": average_features},
+        "feature_count": len(average_features),
+        "is_prediction_layer": True,
+        "is_average_layer": True,
+    }
+
+
 
 def save_layers_to_gpkg(layers, filename=None):
     """
