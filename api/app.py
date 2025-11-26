@@ -32,14 +32,15 @@ import osmnx as ox
 # With 42 subdivisions × 5-10s pause each = 210-420 seconds of just waiting!
 #
 # Solution: Set HUGE value to disable subdivision completely for all reasonable bbox sizes
-# 1° × 1° at 32°N ≈ 95km × 111km = 10,545 km²
-# Using 10 deg² allows bboxes up to ~316km × 316km without subdivision
-ox.settings.max_query_area_size = 10.0  # deg² (HUGE - disable subdivision)
+# IMPORTANT: In OSMnx v2, max_query_area_size is in SQUARE METERS, not square degrees!
+# Default is 2,500,000,000 m² (2,500 km²) = ~50km × 50km
+# Setting to 10 billion m² = 10,000 km² = 100km × 100km to handle large areas without subdivision
+ox.settings.max_query_area_size = 10_000_000_000  # 10 billion m² = 100km × 100km
 
 # Optimize OSMnx for faster downloads
 # CRITICAL: OSMnx v2 uses 'requests_timeout' not 'timeout' (deprecated)
 ox.settings.requests_timeout = 300  # Increase Overpass API timeout to 5 minutes
-ox.settings.memory = 2147483648  # 2GB RAM for Overpass (helps with complex queries)
+ox.settings.overpass_memory = 2147483648  # 2GB RAM for Overpass (v2: 'overpass_memory' not 'memory')
 ox.settings.cache_folder = "/tmp/osmnx_cache"  # Use temp folder on Render
 ox.settings.all_oneway = True  # Simplify by making all edges oneway initially (we convert to undirected later)
 
@@ -52,8 +53,8 @@ ox.settings.overpass_rate_limit = False  # Disable automatic rate limit detectio
 ox.settings.useful_tags_way = ['highway', 'name', 'length']
 
 # Use stderr for unbuffered output in Gunicorn
-sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size} deg²\n")
-sys.stderr.write(f"[STARTUP] Configured OSMnx requests_timeout: {ox.settings.requests_timeout}s, memory: {ox.settings.memory / 1024**3:.1f}GB\n")
+sys.stderr.write(f"[STARTUP] Configured OSMnx max_query_area_size: {ox.settings.max_query_area_size / 1_000_000:.0f} km² ({ox.settings.max_query_area_size:,.0f} m²)\n")
+sys.stderr.write(f"[STARTUP] Configured OSMnx requests_timeout: {ox.settings.requests_timeout}s, overpass_memory: {ox.settings.overpass_memory / 1024**3:.1f}GB\n")
 sys.stderr.flush()
 
 # Load environment variables from .env file (for local development)
