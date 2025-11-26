@@ -3017,29 +3017,111 @@ def calculate_average_layer(layers):
         # Create a map to store probability sums and counts for each feature
         feature_averages = {}
         
+        # # Process each layer
+        # for layer in layers:
+        #     if not layer.get('geojson') or not layer['geojson'].get('features'):
+        #         continue
+        #     seen_ids = set()
+        #     unique_features = []
+                
+        #     for feature in layer['geojson']['features']:
+        #         # Helper function to normalize IDs
+        #         def normalize_id(id_value):
+        #             """Convert ID to consistent format for matching."""
+        #             if id_value is None:
+        #                 return None
+        #             if isinstance(id_value, str) and ',' in id_value:
+        #                 # String with comma-separated values - convert to tuple of ints
+        #                 try:
+        #                     return tuple(map(int, id_value.split(',')))
+        #                 except:
+        #                     return id_value
+        #             if isinstance(id_value, list):
+        #                 return tuple(id_value)
+        #             if isinstance(id_value, tuple):
+        #                 return id_value
+        #             return id_value
+                
+        #         # Use osmid, edge_id, or geometry as unique identifier
+        #         osmid = feature.get('properties', {}).get('osmid')
+        #         edge_id = feature.get('properties', {}).get('edge_id')
+
+        #         if osmid is not None:
+        #             feature_id = normalize_id(osmid)
+        #         elif edge_id is not None:
+        #             feature_id = normalize_id(edge_id)
+        #         else:
+        #             feature_id = str(feature.get('geometry', {}))
+                
+        #         if feature_id not in feature_averages:
+        #             feature_averages[feature_id] = {
+        #                 'geometry': feature.get('geometry'),
+        #                 'properties': feature.get('properties', {}).copy(),
+        #                 'probability_sums': [0.0] * 5,  # For classes 1-5
+        #                 'count': 0
+        #             }
+                
+        #         avg_data = feature_averages[feature_id]
+                
+        #         # Sum probabilities for each class (1-5)
+        #         for i in range(1, 6):
+        #             prob = feature.get('properties', {}).get(f'proba_{i}')
+        #             if prob is not None:
+        #                 avg_data['probability_sums'][i-1] += float(prob)
+                
+        #         avg_data['count'] += 1
+
+# Helper function to normalize IDs
+        def normalize_id(id_value):
+            """Convert ID to consistent format for matching."""
+            if id_value is None:
+                return None
+            if isinstance(id_value, str) and ',' in id_value:
+                # String with comma-separated values - convert to tuple of ints
+                try:
+                    return tuple(map(int, id_value.split(',')))
+                except:
+                    return id_value
+            if isinstance(id_value, list):
+                return tuple(id_value)
+            if isinstance(id_value, tuple):
+                return id_value
+            return id_value
         # Process each layer
         for layer in layers:
             if not layer.get('geojson') or not layer['geojson'].get('features'):
                 continue
-                
+            
+            # CRITICAL FIX: Remove duplicate features by osmid before processing
+            seen_ids = set()
+            unique_features = []
+            original_count = len(layer['geojson']['features'])
+            
             for feature in layer['geojson']['features']:
-                # Helper function to normalize IDs
-                def normalize_id(id_value):
-                    """Convert ID to consistent format for matching."""
-                    if id_value is None:
-                        return None
-                    if isinstance(id_value, str) and ',' in id_value:
-                        # String with comma-separated values - convert to tuple of ints
-                        try:
-                            return tuple(map(int, id_value.split(',')))
-                        except:
-                            return id_value
-                    if isinstance(id_value, list):
-                        return tuple(id_value)
-                    if isinstance(id_value, tuple):
-                        return id_value
-                    return id_value
+                osmid = feature.get('properties', {}).get('osmid')
                 
+                # Create unique key
+                if osmid is not None:
+                    if isinstance(osmid, list):
+                        feat_key = tuple(osmid)
+                    else:
+                        feat_key = osmid
+                else:
+                    feat_key = str(feature.get('geometry', {}))
+                
+                # Skip duplicates
+                if feat_key in seen_ids:
+                    continue
+                    
+                seen_ids.add(feat_key)
+                unique_features.append(feature)
+            
+            # Log if duplicates were removed
+            if len(unique_features) < original_count:
+                logging.warning(f"[AVERAGE] Layer {layer.get('name')}: removed {original_count - len(unique_features)} duplicates")
+            
+            # Now process UNIQUE features only (שים לב לשינוי כאן!)
+            for feature in unique_features:                
                 # Use osmid, edge_id, or geometry as unique identifier
                 osmid = feature.get('properties', {}).get('osmid')
                 edge_id = feature.get('properties', {}).get('edge_id')
@@ -3068,7 +3150,7 @@ def calculate_average_layer(layers):
                         avg_data['probability_sums'][i-1] += float(prob)
                 
                 avg_data['count'] += 1
-        
+
         # Create average features
         average_features = []
         for feature_id, avg_data in feature_averages.items():
