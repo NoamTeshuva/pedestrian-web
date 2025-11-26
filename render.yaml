@@ -6,7 +6,7 @@ services:
     name: pedestrian-api-web          # unique name so it won't attach to the old service
     runtime: python
     rootDir: api
-    plan: free                        # no payment required
+    plan: starter                     # Pro plan: 4GB RAM, 2 CPU (upgraded from free)
     autoDeploy: true
     healthCheckPath: /health
     buildCommand: |
@@ -14,7 +14,7 @@ services:
       pip install --upgrade pip
       pip install -r requirements.txt
       (git lfs install && git lfs pull) || true
-    startCommand: gunicorn app:app -b 0.0.0.0:$PORT --timeout 600
+    startCommand: gunicorn app:app --config gunicorn.conf.py
     # Free plan has no persistent disk; write temp exports to /tmp
     envVars:
       - key: PYTHONUNBUFFERED
