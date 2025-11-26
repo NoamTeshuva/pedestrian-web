@@ -3010,29 +3010,31 @@ def calculate_average_layer(layers):
                 continue
                 
             for feature in layer['geojson']['features']:
-                # Use osmid, edge_id, or geometry as unique identifier
-                # Convert to hashable type (tuple if list, or string)
-                # Helper function to normalize osmid
-                def normalize_osmid(osmid):
-                    """Convert osmid to consistent format for matching."""
-                    if osmid is None:
+                # Helper function to normalize IDs
+                def normalize_id(id_value):
+                    """Convert ID to consistent format for matching."""
+                    if id_value is None:
                         return None
-                    if isinstance(osmid, str) and ',' in osmid:
-                        # String with comma-separated values
-                        return tuple(map(int, osmid.split(',')))
-                    if isinstance(osmid, list):
-                        return tuple(osmid)
-                    if isinstance(osmid, tuple):
-                        return osmid
-                    return osmid
-
+                    if isinstance(id_value, str) and ',' in id_value:
+                        # String with comma-separated values - convert to tuple of ints
+                        try:
+                            return tuple(map(int, id_value.split(',')))
+                        except:
+                            return id_value
+                    if isinstance(id_value, list):
+                        return tuple(id_value)
+                    if isinstance(id_value, tuple):
+                        return id_value
+                    return id_value
+                
+                # Use osmid, edge_id, or geometry as unique identifier
                 osmid = feature.get('properties', {}).get('osmid')
                 edge_id = feature.get('properties', {}).get('edge_id')
 
                 if osmid is not None:
-                    feature_id = normalize_osmid(osmid)
+                    feature_id = normalize_id(osmid)
                 elif edge_id is not None:
-                    feature_id = tuple(edge_id) if isinstance(edge_id, list) else edge_id
+                    feature_id = normalize_id(edge_id)
                 else:
                     feature_id = str(feature.get('geometry', {}))
                 
