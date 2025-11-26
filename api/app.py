@@ -3012,11 +3012,25 @@ def calculate_average_layer(layers):
             for feature in layer['geojson']['features']:
                 # Use osmid, edge_id, or geometry as unique identifier
                 # Convert to hashable type (tuple if list, or string)
+                # Helper function to normalize osmid
+                def normalize_osmid(osmid):
+                    """Convert osmid to consistent format for matching."""
+                    if osmid is None:
+                        return None
+                    if isinstance(osmid, str) and ',' in osmid:
+                        # String with comma-separated values
+                        return tuple(map(int, osmid.split(',')))
+                    if isinstance(osmid, list):
+                        return tuple(osmid)
+                    if isinstance(osmid, tuple):
+                        return osmid
+                    return osmid
+
                 osmid = feature.get('properties', {}).get('osmid')
                 edge_id = feature.get('properties', {}).get('edge_id')
 
                 if osmid is not None:
-                    feature_id = tuple(osmid) if isinstance(osmid, list) else osmid
+                    feature_id = normalize_osmid(osmid)
                 elif edge_id is not None:
                     feature_id = tuple(edge_id) if isinstance(edge_id, list) else edge_id
                 else:
