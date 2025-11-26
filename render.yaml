@@ -14,7 +14,7 @@ services:
       pip install --upgrade pip
       pip install -r requirements.txt
       (git lfs install && git lfs pull) || true
-    startCommand: gunicorn app:app --config gunicorn.conf.py
+    startCommand: gunicorn app:app --workers 4 --threads 2 --timeout 900 --graceful-timeout 120 --bind 0.0.0.0:$PORT
     # Free plan has no persistent disk; write temp exports to /tmp
     envVars:
       - key: PYTHONUNBUFFERED
