@@ -187,11 +187,11 @@ def extract_street_network(place: Optional[str] = None,
             G = ox.graph_from_place(place, network_type=PipelineConfig.NETWORK_TYPE)
             logging.info(f"[OSMNX] Downloaded graph type: {type(G).__name__}")
         else:
-            # OSMnx 2.0+ expects bbox as (west, south, east, north) tuple
-            bbox_osmnx = (bbox[0], bbox[1], bbox[2], bbox[3])  # (west, south, east, north)
+            # Incoming bbox is (west, south, east, north); OSMnx wants north/south/east/west explicitly
+            west, south, east, north = bbox
 
             logging.info(f"[OSMNX] Calling ox.graph_from_bbox with:")
-            logging.info(f"[OSMNX]   bbox: {bbox_osmnx}")
+            logging.info(f"[OSMNX]   west={west}, south={south}, east={east}, north={north}")
             logging.info(f"[OSMNX]   network_type: {PipelineConfig.NETWORK_TYPE}")
 
             # CRITICAL DEBUGGING: Check settings object
@@ -205,8 +205,8 @@ def extract_street_network(place: Optional[str] = None,
             logging.info(f"[OSMNX]   settings.max_query_area_size: {ox_settings_module.max_query_area_size} m^2")
 
             # Calculate expected area to compare with OSMnx's calculation
-            width_deg = bbox_osmnx[2] - bbox_osmnx[0]
-            height_deg = bbox_osmnx[3] - bbox_osmnx[1]
+            width_deg = east - west
+            height_deg = north - south
             area_deg2 = width_deg * height_deg
             approx_area_m2 = (width_deg * 95000) * (height_deg * 111000)
 
@@ -227,7 +227,10 @@ def extract_street_network(place: Optional[str] = None,
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
                 G = ox.graph_from_bbox(
-                    bbox=bbox_osmnx,
+                    north=north,
+                    south=south,
+                    east=east,
+                    west=west,
                     network_type=PipelineConfig.NETWORK_TYPE
                 )
 
