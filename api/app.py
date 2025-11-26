@@ -2510,19 +2510,31 @@ def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
             else:
                 logging.warning(f"Column {gpkg_col} not found in GPKG")
         
-        # מילוי ערכים חסרים - only for features the model actually uses
+        # מילוי ערכים חסרים - for all features the model expects
         defaults = {
-            'betweenness': 0.0,
-            'closeness': 0.0,
+            # Temporal features
             'Hour': 12,
+            'Month': 6,
+            'DayOfWeek': 2,
             'is_weekend': 0,
             'time_of_day': 'afternoon',
+            # Network features
+            'betweenness': 0.0,
+            'closeness': 0.0,
             'land_use': 'other',
-            'highway': 'unclassified'
+            'highway': 'unclassified',
+            # Environmental features
+            'sensor_canopy_pct': 0.3,
+            'terrain_complexity': 0.5,
+            'topographic_position': 0.5,
+            # Weather features
+            'temperature': 20.0,
+            'precipitation': 0.0,
+            'wind_speed': 10.0
         }
 
         for col, default_val in defaults.items():
-            if col in FEATURE_COLUMNS:  # Use app.py FEATURE_COLUMNS, not PipelineConfig
+            if col in PipelineConfig.FEATURE_COLUMNS:  # Use PipelineConfig to match model
                 if col not in model_data.columns:
                     model_data[col] = default_val
                     logging.info(f"Added missing column {col} with default value {default_val}")
@@ -2533,9 +2545,14 @@ def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
                         logging.info(f"Filled {before_fill} missing values in {col}")
         
         # CRITICAL: Use the EXACT column order that the model was trained with
-        # The model was trained with FEATURE_COLUMNS from app.py (line 1107), NOT PipelineConfig
+        # The model uses PipelineConfig.FEATURE_COLUMNS (15 features starting with Hour)
+        # NOT the 7-feature FEATURE_COLUMNS from app.py line 1107
         # Order matters for CatBoost! Using wrong order causes: "At position X should be feature Y"
-        model_feature_order = FEATURE_COLUMNS  # ["betweenness","closeness","Hour","is_weekend","time_of_day","land_use","highway"]
+        # PipelineConfig.FEATURE_COLUMNS = ["Hour", "Month", "DayOfWeek", "is_weekend", "time_of_day",
+        #                                    "betweenness", "closeness", "land_use", "highway",
+        #                                    "sensor_canopy_pct", "terrain_complexity", "topographic_position",
+        #                                    "temperature", "precipitation", "wind_speed"]
+        model_feature_order = PipelineConfig.FEATURE_COLUMNS
 
         # וידוא שיש לנו את כל העמודות הנדרשות בסדר הנכון
         final_columns = [col for col in model_feature_order if col in model_data.columns]
@@ -2545,8 +2562,8 @@ def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
         model_data = model_data.replace([np.inf, -np.inf], 0).fillna(0)
 
         # המרת עמודות קטגוריות לstring
-        # Use CATEGORICAL_COLUMNS from app.py, not PipelineConfig
-        categorical_cols = [col for col in CATEGORICAL_COLUMNS if col in model_data.columns]
+        # Use PipelineConfig.CATEGORICAL_COLUMNS which matches the model
+        categorical_cols = [col for col in PipelineConfig.CATEGORICAL_COLUMNS if col in model_data.columns]
         for col in categorical_cols:
             model_data[col] = model_data[col].astype(str)
         
