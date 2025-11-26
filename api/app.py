@@ -2872,11 +2872,6 @@ def predict_multi():
         place = request.args.get("place")
         bbox_str = request.args.get("bbox")
 
-        # Track whether this is a city search or manual bbox draw
-        # City search: user provided place name → cache enabled
-        # Manual bbox: user drew rectangle → skip cache (unlikely to match)
-        is_city_search = (place is not None)
-
         # parse lists (fallback to defaults if not provided)
         def _parse_csv(argval, default_list):
             if argval is None or str(argval).strip() == "":
@@ -2892,8 +2887,8 @@ def predict_multi():
         # Get country parameter (default to israel)
         country = request.args.get("country", "israel").lower()
 
-        # CRITICAL: Israel-only validation for caching (only applies to city searches)
-        if CACHE_ENABLED and is_city_search and not validate_country(country):
+        # CRITICAL: Israel-only validation for caching (only applies to place-based searches)
+        if CACHE_ENABLED and place and not validate_country(country):
             return jsonify({
                 "error": "Country not supported",
                 "message": f"Only 'israel' is supported. Received: {country}",
@@ -2902,55 +2897,6 @@ def predict_multi():
 
         # validate basic params (place/bbox)
         place, bbox, _ = validate_request_params(place, bbox_str, None)
-
-        # COMPREHENSIVE BBOX DEBUGGING
-        if bbox and not place:
-            west, south, east, north = bbox
-            width_deg = east - west
-            height_deg = north - south
-            area_deg2 = width_deg * height_deg
-
-            # Calculate physical dimensions (approximate at Tel Aviv latitude ~32°N)
-            width_m = width_deg * 95000  # 1° longitude ≈ 95km at 32°N
-            height_m = height_deg * 111000  # 1° latitude ≈ 111km
-            area_m2 = width_m * height_m
-
-            # Use the configured OSMnx max area
-            osmnx_max_area = ox.settings.max_query_area_size  # deg² (configured at startup)
-            area_ratio = area_deg2 / osmnx_max_area
-
-            logging.info("=" * 80)
-            logging.info("BBOX DRAW DEBUGGING")
-            logging.info("=" * 80)
-            logging.info(f"Raw bbox string from frontend: {bbox_str}")
-            logging.info(f"Parsed bbox: W={west:.8f}, S={south:.8f}, E={east:.8f}, N={north:.8f}")
-            logging.info(f"")
-            logging.info(f"PHYSICAL DIMENSIONS:")
-            logging.info(f"  Width:  {width_deg:.8f}° = {width_m:.1f} meters ({width_m/100:.1f} city blocks)")
-            logging.info(f"  Height: {height_deg:.8f}° = {height_m:.1f} meters ({height_m/100:.1f} city blocks)")
-            logging.info(f"  Area:   {area_deg2:.10f} deg² = {area_m2:.0f} m²")
-            logging.info(f"")
-            logging.info(f"OSMNX ANALYSIS:")
-            logging.info(f"  OSMnx configured max area: {osmnx_max_area} deg²")
-            logging.info(f"  Area ratio: {area_ratio:.3f} ({area_ratio * 100:.1f}% of max)")
-            if area_ratio > 1.0:
-                subdivisions = int(area_ratio)
-                estimated_time = subdivisions * 6
-                logging.warning(f"  ⚠️  OSMnx will subdivide into ~{subdivisions} pieces")
-                logging.warning(f"  ⚠️  Estimated download time: {estimated_time} seconds ({estimated_time/60:.1f} minutes)")
-                if estimated_time > 600:
-                    logging.warning(f"  ⚠️  Worker timeout: 600 seconds - THIS WILL TIMEOUT!")
-                else:
-                    logging.warning(f"  ⚠️  This may take a while but should complete within timeout")
-            else:
-                logging.info(f"  ✓ Area fits within OSMnx max, no subdivision expected")
-            logging.info(f"")
-            logging.info(f"EXPECTED STREETS:")
-            # Rough estimate: major roads every 100m + minor roads/paths
-            estimated_streets = int((width_m + height_m) / 50)
-            logging.info(f"  Major roads: ~{max(3, int(estimated_streets * 0.2))} streets")
-            logging.info(f"  All walkable paths (footpaths, alleys, etc): ~{estimated_streets} total segments")
-            logging.info("=" * 80)
 
         # choose a representative timestamp (any valid combo) to build base features once
         # we will override Hour/is_weekend/time_of_day later per combination
@@ -2965,29 +2911,15 @@ def predict_multi():
         start_loading_animation()
         update_progress("starting", 0, total_steps, f"מתחיל חיזוי עבור {place or 'bbox'}")
 
-        # DEBUG: Log endpoint entry with PID and parameters
-        import os
-        logging.info(f"[ENDPOINT /predict-multi] PID={os.getpid()} | place={place}, bbox={bbox}, is_city_search={is_city_search}")
-
-        # Get STATIC features
-        # City search: Use cached version (disk cache helps with repeated searches)
-        # Manual bbox: Skip ALL caching (unique coordinates, cache never hits)
+        # Extract features using simple pipeline (works for both place and bbox)
         update_progress("extracting_features", 1, total_steps, f"מחלץ מאפיינים עבור {place or 'bbox'}")
 
-        if is_city_search:
-            # Use cached version for city searches
-            from feature_engineering.feature_pipeline import run_static_feature_pipeline_cached_normalized
-            features_gdf, pipeline_metadata = run_static_feature_pipeline_cached_normalized(
-                place=place,
-                bbox=bbox
-            )
-        else:
-            # BBOX: Skip disk cache - go straight to OSMnx
-            from feature_engineering.feature_pipeline import run_static_feature_pipeline
-            features_gdf, pipeline_metadata = run_static_feature_pipeline(
-                place=place,
-                bbox=bbox
-            )
+        from feature_engineering.feature_pipeline import run_feature_pipeline
+        features_gdf, pipeline_metadata = run_feature_pipeline(
+            place=place,
+            bbox=bbox,
+            timestamp=rep_ts
+        )
 
         update_progress("extracting_features", 2, total_steps, f"הושלמה חילוץ מאפיינים - {len(features_gdf)} רחובות")
 
