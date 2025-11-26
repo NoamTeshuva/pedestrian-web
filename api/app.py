@@ -2510,9 +2510,8 @@ def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
             else:
                 logging.warning(f"Column {gpkg_col} not found in GPKG")
         
-        # מילוי ערכים חסרים
+        # מילוי ערכים חסרים - only for features the model actually uses
         defaults = {
-            'length': 0.0,
             'betweenness': 0.0,
             'closeness': 0.0,
             'Hour': 12,
@@ -2521,9 +2520,9 @@ def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
             'land_use': 'other',
             'highway': 'unclassified'
         }
-        
+
         for col, default_val in defaults.items():
-            if col in PipelineConfig.FEATURE_COLUMNS:
+            if col in FEATURE_COLUMNS:  # Use app.py FEATURE_COLUMNS, not PipelineConfig
                 if col not in model_data.columns:
                     model_data[col] = default_val
                     logging.info(f"Added missing column {col} with default value {default_val}")
@@ -2533,15 +2532,21 @@ def _prepare_gpkg_data_for_model(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
                     if before_fill > 0:
                         logging.info(f"Filled {before_fill} missing values in {col}")
         
-        # וידוא שיש לנו את כל העמודות הנדרשות
-        final_columns = [col for col in PipelineConfig.FEATURE_COLUMNS if col in model_data.columns]
+        # CRITICAL: Use the EXACT column order that the model was trained with
+        # The model was trained with FEATURE_COLUMNS from app.py (line 1107), NOT PipelineConfig
+        # Order matters for CatBoost! Using wrong order causes: "At position X should be feature Y"
+        model_feature_order = FEATURE_COLUMNS  # ["betweenness","closeness","Hour","is_weekend","time_of_day","land_use","highway"]
+
+        # וידוא שיש לנו את כל העמודות הנדרשות בסדר הנכון
+        final_columns = [col for col in model_feature_order if col in model_data.columns]
         model_data = model_data[final_columns].copy()
-        
+
         # ניקוי נתונים
         model_data = model_data.replace([np.inf, -np.inf], 0).fillna(0)
-        
+
         # המרת עמודות קטגוריות לstring
-        categorical_cols = [col for col in PipelineConfig.CATEGORICAL_COLUMNS if col in model_data.columns]
+        # Use CATEGORICAL_COLUMNS from app.py, not PipelineConfig
+        categorical_cols = [col for col in CATEGORICAL_COLUMNS if col in model_data.columns]
         for col in categorical_cols:
             model_data[col] = model_data[col].astype(str)
         
