@@ -86,6 +86,9 @@ class PedestrianPredictionApp {
 		this.downloadGpkgBtn = document.getElementById("downloadGpkgBtn");
 		this.downloadBtnText = document.getElementById("downloadBtnText");
 		this.downloadSpinner = document.getElementById("downloadSpinner");
+		this.downloadCsvBtn = document.getElementById("downloadCsvBtn");
+		this.downloadCsvBtnText = document.getElementById("downloadCsvBtnText");
+		this.downloadCsvSpinner = document.getElementById("downloadCsvSpinner");
 
 		// Weather summary elements
 		this.weatherSummarySection = document.getElementById("weatherSummarySection");
@@ -136,6 +139,9 @@ class PedestrianPredictionApp {
 		// Download
 		this.downloadGpkgBtn.addEventListener("click", () =>
 			this.handleDownloadGpkg()
+		);
+		this.downloadCsvBtn.addEventListener("click", () =>
+			this.handleDownloadCsv()
 		);
 
 		// Clear layers
@@ -575,9 +581,13 @@ class PedestrianPredictionApp {
 				`${bbox.west},${bbox.south},${bbox.east},${bbox.north}`
 			);
 		}
-		
+
 		// Always include average layer
 		params.set("include_average", "true");
+
+		// Request server-side file generation for downloads
+		params.set("create_gpkg", "true");
+		params.set("create_csv", "true");
 
 		this.totalRequests = 1;
 		try {
@@ -632,6 +642,12 @@ class PedestrianPredictionApp {
 				this.displayWeatherSummary(this.allLayersData);
 				this.downloadSection.classList.remove("hidden");
 				this.showStatusMessage(`נטענו ${this.allLayersData.length} שכבות בהצלחה`, "success");
+
+				// Store server-generated file download URLs
+				this.serverGpkgUrl = data.gpkg_available ? data.gpkg_download_url : null;
+				this.serverCsvUrl = data.csv_available ? data.csv_download_url : null;
+
+				// Also create client-side GPKG for backward compatibility
 				await this.createCombinedGpkg(data.place || place || "");
 			} else {
 				this.showStatusMessage("לא התקבלו תוצאות חיזוי", "error", 0);
@@ -1565,6 +1581,55 @@ class PedestrianPredictionApp {
 			}
 		} else {
 			this.showStatusMessage("אין קובץ להורדה", "error");
+		}
+	}
+
+	async handleDownloadCsv() {
+		this.hideStatusMessage();
+
+		// Check if we have a server-generated CSV URL
+		if (this.serverCsvUrl) {
+			// Download from server-generated file
+			this.setButtonLoading(
+				this.downloadCsvBtn,
+				this.downloadCsvBtnText,
+				this.downloadCsvSpinner,
+				true
+			);
+
+			try {
+				const response = await fetch(`${this.API_BASE_URL}${this.serverCsvUrl}`);
+
+				if (response.ok) {
+					const blob = await response.blob();
+					const url = URL.createObjectURL(blob);
+					const a = document.createElement("a");
+					a.href = url;
+					a.download = `predictions_all_layers_${new Date()
+						.toISOString()
+						.slice(0, 10)}.csv`;
+					document.body.appendChild(a);
+					a.click();
+					document.body.removeChild(a);
+					URL.revokeObjectURL(url);
+
+					this.showStatusMessage("קובץ CSV הורד בהצלחה", "success");
+				} else {
+					throw new Error("Failed to download CSV");
+				}
+			} catch (error) {
+				console.error("CSV download error:", error);
+				this.showStatusMessage("שגיאה בהורדת קובץ CSV", "error");
+			} finally {
+				this.setButtonLoading(
+					this.downloadCsvBtn,
+					this.downloadCsvBtnText,
+					this.downloadCsvSpinner,
+					false
+				);
+			}
+		} else {
+			this.showStatusMessage("קובץ CSV לא זמין", "error");
 		}
 	}
 
