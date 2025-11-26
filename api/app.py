@@ -2844,6 +2844,35 @@ def download_gpkg(filename):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/download-csv/<filename>", methods=["GET"])
+def download_csv(filename):
+    """Download a CSV file created during predict-multi."""
+    try:
+        from pathlib import Path
+        import os
+
+        # Security: only allow safe filenames (no path traversal)
+        if not filename.endswith('.csv') or '/' in filename or '\\' in filename:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        csv_path = Path(tempfile.gettempdir()) / filename
+
+        if not csv_path.exists():
+            return jsonify({"error": "File not found"}), 404
+
+        logging.info(f"[DOWNLOAD] Serving CSV file: {filename}")
+        return send_file(
+            str(csv_path),
+            as_attachment=True,
+            download_name=filename,
+            mimetype='text/csv'
+        )
+
+    except Exception as e:
+        logging.error(f"Error downloading CSV: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/predict-multi", methods=["GET"])
 def predict_multi():
     """
@@ -2862,9 +2891,10 @@ def predict_multi():
       - times_of_day: csv of values in {morning,afternoon,evening,night}
       - include_average: boolean to include average layer (default: true)
       - create_gpkg: boolean to create GPKG file during processing (default: false)
+      - create_csv: boolean to create CSV file during processing (default: false)
 
     Returns:
-      { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox, gpkg_url (if requested) }
+      { layers: [{ name, geojson, feature_count, is_prediction_layer }], place, bbox, gpkg_url (if requested), csv_url (if requested) }
 
     Errors:
       400: Country not supported (only israel is allowed)
@@ -2884,6 +2914,7 @@ def predict_multi():
         times_of_day = _parse_csv(request.args.get("times_of_day"), ["morning", "afternoon", "evening", "night"])
         include_average = request.args.get("include_average", "true").lower() == "true"
         create_gpkg = request.args.get("create_gpkg", "false").lower() == "true"
+        create_csv = request.args.get("create_csv", "false").lower() == "true"
 
         # Get country parameter (default to israel)
         country = request.args.get("country", "israel").lower()
@@ -2949,6 +2980,16 @@ def predict_multi():
             gpkg_filename = f"{place or 'bbox'}_{uuid.uuid4().hex[:8]}.gpkg"
             gpkg_path = Path(tempfile.gettempdir()) / gpkg_filename
             logging.info(f"[GPKG] Creating GPKG file during predict-multi: {gpkg_path}")
+
+        # Initialize CSV file if requested
+        csv_path = None
+        csv_filename = None
+        if create_csv:
+            import uuid
+            from pathlib import Path
+            csv_filename = f"{place or 'bbox'}_{uuid.uuid4().hex[:8]}.csv"
+            csv_path = Path(tempfile.gettempdir()) / csv_filename
+            logging.info(f"[CSV] Creating CSV file during predict-multi: {csv_path}")
 
         # CRITICAL: Extract weather for each unique (season, time_of_day) combination
         # Weather varies by BOTH season AND time of day
@@ -3157,6 +3198,35 @@ def predict_multi():
                         except Exception as e:
                             logging.error(f"[GPKG] Error writing layer '{layer_name}': {e}")
 
+                    # Write to CSV if requested
+                    if create_csv and csv_path:
+                        try:
+                            # If we hit cache, reconstruct gdf_out from cached GeoJSON
+                            if cache_hit and cached_geojson:
+                                gdf_out = gpd.GeoDataFrame.from_features(cached_geojson['features'])
+
+                            # Convert GeoDataFrame to regular DataFrame for CSV export
+                            df_out = gdf_out.copy()
+
+                            # Add geometry as WKT (Well-Known Text) for CSV compatibility
+                            if 'geometry' in df_out.columns:
+                                df_out['geometry_wkt'] = df_out['geometry'].apply(lambda geom: geom.wkt if geom else None)
+                                # Also add centroid lat/lon for convenience
+                                df_out['centroid_lon'] = df_out['geometry'].apply(lambda geom: geom.centroid.x if geom else None)
+                                df_out['centroid_lat'] = df_out['geometry'].apply(lambda geom: geom.centroid.y if geom else None)
+                                # Drop the original geometry column (can't be exported to CSV)
+                                df_out = df_out.drop(columns=['geometry'])
+
+                            # Add layer name as a column to distinguish layers in combined CSV
+                            df_out.insert(0, 'layer', layer_name)
+
+                            # Append to CSV file (write header only for first layer)
+                            write_header = not csv_path.exists()
+                            df_out.to_csv(csv_path, mode='a', index=False, header=write_header)
+                            logging.info(f"[CSV] Written layer '{layer_name}' to {csv_path}")
+                        except Exception as e:
+                            logging.error(f"[CSV] Error writing layer '{layer_name}': {e}")
+
                     layers.append({
                         "name": layer_name,
                         "geojson": clean_data,
@@ -3183,6 +3253,28 @@ def predict_multi():
                         logging.info(f"[GPKG] Written average layer to {gpkg_path}")
                     except Exception as e:
                         logging.error(f"[GPKG] Error writing average layer: {e}")
+
+                # Write average layer to CSV if requested
+                if create_csv and csv_path and 'geojson' in average_layer:
+                    try:
+                        avg_gdf = gpd.GeoDataFrame.from_features(average_layer['geojson']['features'])
+
+                        # Convert to DataFrame for CSV
+                        avg_df = avg_gdf.copy()
+                        if 'geometry' in avg_df.columns:
+                            avg_df['geometry_wkt'] = avg_df['geometry'].apply(lambda geom: geom.wkt if geom else None)
+                            avg_df['centroid_lon'] = avg_df['geometry'].apply(lambda geom: geom.centroid.x if geom else None)
+                            avg_df['centroid_lat'] = avg_df['geometry'].apply(lambda geom: geom.centroid.y if geom else None)
+                            avg_df = avg_df.drop(columns=['geometry'])
+
+                        # Add layer name
+                        avg_df.insert(0, 'layer', 'average')
+
+                        # Append to CSV
+                        avg_df.to_csv(csv_path, mode='a', index=False, header=False)
+                        logging.info(f"[CSV] Written average layer to {csv_path}")
+                    except Exception as e:
+                        logging.error(f"[CSV] Error writing average layer: {e}")
 
                 layers.insert(0, average_layer)  # Add average layer at the beginning
                 logging.info(f"Added average layer with {average_layer['feature_count']} features")
@@ -3213,6 +3305,15 @@ def predict_multi():
             logging.info(f"[GPKG] File ready for download: {gpkg_filename}")
         else:
             response_data["gpkg_available"] = False
+
+        # Add CSV download URL if file was created
+        if create_csv and csv_path and csv_path.exists():
+            response_data["csv_available"] = True
+            response_data["csv_filename"] = csv_filename
+            response_data["csv_download_url"] = f"/download-csv/{csv_filename}"
+            logging.info(f"[CSV] File ready for download: {csv_filename}")
+        else:
+            response_data["csv_available"] = False
 
         return json_response(response_data)
 
