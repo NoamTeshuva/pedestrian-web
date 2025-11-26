@@ -189,50 +189,93 @@ def sample_raster_at_points(raster_url: str, gdf: gpd.GeoDataFrame, buffer_meter
         coords = [coord for sample_set in all_coords_wgs84 for coord in sample_set]
 
         # Sample raster at point locations
-        with rasterio.open(raster_url) as src:
-            # Transform coordinates from WGS84 to raster's CRS
-            if src.crs and src.crs != "EPSG:4326":
-                # Convert WGS84 points to raster's CRS
-                from pyproj import Transformer
-                transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
-                coords_transformed = [transformer.transform(x, y) for x, y in coords]
-            else:
-                coords_transformed = coords
+        # with rasterio.open(raster_url) as src:
+        #     # Transform coordinates from WGS84 to raster's CRS
+        #     if src.crs and src.crs != "EPSG:4326":
+        #         # Convert WGS84 points to raster's CRS
+        #         from pyproj import Transformer
+        #         transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+        #         coords_transformed = [transformer.transform(x, y) for x, y in coords]
+        #     else:
+        #         coords_transformed = coords
 
-            # Sample values at transformed coordinates
-            values = [val[0] for val in src.sample(coords_transformed)]
-            values_array = np.array(values)
+        #     # Sample values at transformed coordinates
+        #     values = [val[0] for val in src.sample(coords_transformed)]
+        #     values_array = np.array(values)
 
-            # Handle NoData values (common value is -9999)
-            nodata = src.nodata
-            if nodata is not None:
-                # Replace NoData with NaN for proper handling
-                values_array = np.where(values_array == nodata, np.nan, values_array)
+        #     # Handle NoData values (common value is -9999)
+        #     nodata = src.nodata
+        #     if nodata is not None:
+        #         # Replace NoData with NaN for proper handling
+        #         values_array = np.where(values_array == nodata, np.nan, values_array)
 
-            # Process based on whether buffer sampling was used
-            n_streets = len(gdf)
-            if use_buffer:
-                # Reshape to (n_streets, 3) for center + left + right samples
-                values_reshaped = values_array.reshape(n_streets, 3)
+        #     # Process based on whether buffer sampling was used
+        #     n_streets = len(gdf)
+        #     if use_buffer:
+        #         # Reshape to (n_streets, 3) for center + left + right samples
+        #         values_reshaped = values_array.reshape(n_streets, 3)
 
-                # Check if all values are NaN (no coverage)
-                if np.isnan(values_reshaped).all():
-                    logging.warning("All sampled raster values are NaN (no coverage for this area)")
-                    return np.full(n_streets, np.nan)
+        #         # Check if all values are NaN (no coverage)
+        #         if np.isnan(values_reshaped).all():
+        #             logging.warning("All sampled raster values are NaN (no coverage for this area)")
+        #             return np.full(n_streets, np.nan)
 
-                # Take maximum value across center and buffer samples
-                # This captures roadside vegetation better than just center sampling
+        #         # Take maximum value across center and buffer samples
+        #         # This captures roadside vegetation better than just center sampling
+        #         result_values = np.nanmax(values_reshaped, axis=1)
+        #     else:
+        #         # No buffer: check for all-NaN before returning
+        #         if np.isnan(values_array).all():
+        #             logging.warning("All sampled raster values are NaN (no coverage for this area)")
+        #             return np.full(n_streets, np.nan)
+
+        #         # No buffer: just return center values directly
+        #         result_values = values_array
+
+        #     return result_values
+
+       # Add timeout and disable auxiliary files for faster cloud access
+        rasterio_env = {
+            'GDAL_DISABLE_READDIR_ON_OPEN': 'EMPTY_DIR',  # Don't search for auxiliary files
+            'CPL_VSIL_CURL_ALLOWED_EXTENSIONS': '.tif',   # Only allow .tif files
+            'GDAL_HTTP_TIMEOUT': '1200',                     # timeout for HTTP requests in seconds
+            'GDAL_HTTP_MAX_RETRY': '3',
+            'GDAL_HTTP_RETRY_DELAY': '1'
+        }
+
+        with rasterio.Env(**rasterio_env):
+            with rasterio.open(raster_url) as src:
+                # Transform coordinates from WGS84 to raster's CRS
+                if src.crs and src.crs != "EPSG:4326":
+                    # Convert WGS84 points to raster's CRS
+                    from pyproj import Transformer
+                    transformer = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
+                    coords_transformed = [transformer.transform(x, y) for x, y in coords]
+                else:
+                    coords_transformed = coords
+
+                # Sample all points at once (much faster than individual samples)
+                sampled_values = np.array([
+                    next(iter(src.sample([(x, y)])), np.nan)
+                    for x, y in coords_transformed
+                ])
+
+                # Reshape back to original structure (n_edges x n_samples_per_edge)
+                samples_per_edge = len(all_coords_wgs84[0])  # Should be 1 or 3
+                n_edges = len(all_coords_wgs84)
+                values_reshaped = sampled_values.reshape((n_edges, samples_per_edge))
+
+                # For each edge, take the maximum value across all sample points
+                # (This helps detect street-side vegetation/canopy)
                 result_values = np.nanmax(values_reshaped, axis=1)
-            else:
-                # No buffer: check for all-NaN before returning
-                if np.isnan(values_array).all():
-                    logging.warning("All sampled raster values are NaN (no coverage for this area)")
-                    return np.full(n_streets, np.nan)
 
-                # No buffer: just return center values directly
-                result_values = values_array
+                logging.info(
+                    f"Sampled {raster_url.split('/')[-1]} with {buffer_meters}m buffer: "
+                    f"min={np.nanmin(result_values):.3f}, max={np.nanmax(result_values):.3f}, "
+                    f"mean={np.nanmean(result_values):.3f}, median={np.nanmedian(result_values):.3f}"
+                )
 
-            return result_values
+                return result_values 
 
     except Exception as e:
         logging.error(f"Failed to sample raster: {e}", exc_info=True)
