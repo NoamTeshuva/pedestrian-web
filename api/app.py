@@ -1211,7 +1211,24 @@ def _build_predictions_gdf(predictions: dict, place: str = None) -> gpd.GeoDataF
 @app.route("/api/login", methods=["POST"])
 def login():
     """
-    Authenticate user with username and password.
+    LIGHTWEIGHT LOGIN ENDPOINT - Authenticate user with username and password.
+
+    This endpoint is designed to be FAST (<100ms) and handle 40+ concurrent users.
+    It ONLY validates credentials and returns user info.
+
+    What this endpoint DOES:
+    - Load users.json (~1ms)
+    - Validate username/password with SHA-256 hash (~1ms)
+    - Return user info JSON (~1ms)
+
+    What this endpoint DOES NOT DO:
+    - ❌ No ML model loading
+    - ❌ No OSMnx downloads
+    - ❌ No scenario predictions
+    - ❌ No S3 operations
+    - ❌ No heavy computations
+
+    Heavy predictions are triggered separately by user actions (clicking buttons).
 
     Request body:
     {

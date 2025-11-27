@@ -252,22 +252,37 @@
                     loginSubmitBtn.textContent = 'מתחבר...';
 
                     try {
+                        // LIGHTWEIGHT LOGIN: Only validates credentials, no heavy ML/OSM work
+                        // Add 30-second timeout to prevent infinite "מתחבר..." state
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
                         const response = await fetch(`${window.API_BASE}/api/login`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 username: username,
                                 password: password
-                            })
+                            }),
+                            signal: controller.signal // Enable timeout
                         });
+
+                        clearTimeout(timeoutId); // Clear timeout if request completes
 
                         const data = await response.json();
 
+                        // Handle HTTP error responses (4xx, 5xx)
                         if (!response.ok) {
-                            throw new Error(data.error || 'שגיאה בהתחברות');
+                            if (response.status === 401 || response.status === 403) {
+                                throw new Error('שם משתמש או סיסמה שגויים');
+                            } else if (response.status >= 500) {
+                                throw new Error('שגיאת שרת, נסה שוב מאוחר יותר');
+                            } else {
+                                throw new Error(data.error || 'שגיאה בהתחברות');
+                            }
                         }
 
-                        // Login successful
+                        // Login successful (no predictions run during login)
                         window.CURRENT_USER = data.user;
                         localStorage.setItem('currentUser', JSON.stringify(data.user));
                         localStorage.setItem('username', username);
@@ -297,8 +312,17 @@
 
                     } catch (error) {
                         console.error('Login error:', error);
-                        showError(error.message || 'שם משתמש או סיסמה שגויים');
+
+                        // Specific error messages based on error type
+                        if (error.name === 'AbortError') {
+                            showError('הבקשה ארכה יותר מדי - נסה שוב');
+                        } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                            showError('שגיאה בחיבור לשרת, נסה שוב מאוחר יותר');
+                        } else {
+                            showError(error.message || 'שגיאה בהתחברות - נסה שוב');
+                        }
                     } finally {
+                        // CRITICAL: Always stop loading state so UI doesn't stay stuck
                         loginSubmitBtn.disabled = false;
                         loginSubmitBtn.textContent = 'כניסה';
                     }

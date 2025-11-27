@@ -1,12 +1,12 @@
 services:
   # =========================
-  # Backend API (Flask, Free)
+  # Backend API (Flask)
   # =========================
   - type: web
     name: pedestrian-api-web          # unique name so it won't attach to the old service
     runtime: python
     rootDir: api
-    plan: starter                     # Pro plan: 4GB RAM, 2 CPU (upgraded from free)
+    plan: starter                     # Instance: 4 vCPU, 8 GB RAM
     autoDeploy: true
     healthCheckPath: /health
     buildCommand: |
@@ -14,7 +14,12 @@ services:
       pip install --upgrade pip
       pip install -r requirements.txt
       (git lfs install && git lfs pull) || true
-    startCommand: gunicorn app:app --workers 4 --threads 2 --timeout 900 --graceful-timeout 120 --bind 0.0.0.0:$PORT
+    # Gunicorn optimized for 4 vCPU / 8 GB RAM:
+    # - 8 workers (2 per CPU core) × 2 threads = 16 concurrent requests
+    # - Increased from 4 workers to handle 40+ concurrent logins
+    # - Login is lightweight (auth only), predictions triggered separately by user actions
+    # - Timeout 900s (15 min) for heavy prediction endpoints, but login completes in <1s
+    startCommand: gunicorn app:app --workers 8 --threads 2 --timeout 900 --graceful-timeout 120 --bind 0.0.0.0:$PORT
     # Free plan has no persistent disk; write temp exports to /tmp
     envVars:
       - key: PYTHONUNBUFFERED

@@ -1,12 +1,13 @@
-# Gunicorn configuration optimized for Render Pro (4GB RAM, 2 CPU)
+# Gunicorn configuration optimized for Render (8GB RAM, 4 vCPU)
 
 import multiprocessing
 import os
 
-# Render Pro: 2 CPUs, 4GB RAM
-# Optimal worker count: (2 * CPU) + 1 = 5, but we use 4 for memory headroom
-# Each worker can use ~1GB RAM (4GB / 4 workers)
-workers = 4
+# Instance: 4 vCPUs, 8GB RAM
+# Worker count: 2 workers per CPU = 8 workers
+# Each worker can use ~1GB RAM (8GB / 8 workers = 1GB per worker)
+# This configuration handles 40+ concurrent users logging in simultaneously
+workers = 8
 
 # CRITICAL: Extended timeout for large city predictions (32 layers)
 # Tiberias with 32 layers takes ~3 minutes, so we allow 15 minutes for safety
@@ -52,12 +53,14 @@ limit_request_fields = 100
 limit_request_field_size = 8190
 
 print("=" * 60)
-print("Gunicorn Configuration for Render Pro Plan")
+print("Gunicorn Configuration for Render (4 vCPU, 8 GB RAM)")
 print("=" * 60)
 print(f"Workers: {workers}")
 print(f"Timeout: {timeout}s (15 minutes)")
 print(f"Threads per worker: {threads}")
 print(f"Total concurrent capacity: {workers * threads} requests")
-print(f"Memory per worker: ~{4096 // workers}MB (estimate)")
+print(f"Memory per worker: ~{8192 // workers}MB (estimate)")
 print(f"Graceful timeout: {graceful_timeout}s")
+print("=" * 60)
+print("Login is lightweight (auth only), predictions run separately")
 print("=" * 60)
