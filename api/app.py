@@ -2731,14 +2731,15 @@ def read_csv():
             # קריאת CSV
             try:
                 # Read CSV with proper quoting to handle commas in text fields
-                # quoting=csv.QUOTE_NONNUMERIC ensures fields with commas are properly quoted
-                # on_bad_lines='skip' skips malformed rows instead of crashing
+                # QUOTE_MINIMAL: Only quote fields containing special chars (commas, quotes, newlines)
+                # This is the standard CSV behavior - doesn't force type conversion like QUOTE_NONNUMERIC
                 df = pd.read_csv(
                     tmp_path,
-                    quoting=csv.QUOTE_NONNUMERIC,
+                    quoting=csv.QUOTE_MINIMAL,  # Standard CSV quoting
                     on_bad_lines='warn',  # Warn about bad lines but continue
                     encoding='utf-8',
-                    engine='python'  # More flexible parser
+                    engine='python',  # More flexible parser
+                    escapechar='\\'  # Handle escaped quotes
                 )
                 if df.empty:
                     return jsonify({"error": "CSV file is empty"}), 400
@@ -3823,9 +3824,10 @@ def predict_multi():
 
                             # Append to CSV file (write header only for first layer)
                             write_header = not csv_path.exists()
-                            # Use QUOTE_NONNUMERIC to properly quote text fields with commas (street names, geometry_wkt)
+                            # Use QUOTE_MINIMAL to quote only fields with special chars (commas, quotes, newlines)
+                            # This is standard CSV behavior - fields with commas get quoted automatically
                             df_out.to_csv(csv_path, mode='a', index=False, header=write_header,
-                                        quoting=csv.QUOTE_NONNUMERIC, encoding='utf-8')
+                                        quoting=csv.QUOTE_MINIMAL, encoding='utf-8', escapechar='\\')
                             logging.info(f"[CSV] Written layer '{layer_name}' to {csv_path}")
                         except Exception as e:
                             logging.error(f"[CSV] Error writing layer '{layer_name}': {e}")
@@ -3870,12 +3872,20 @@ def predict_multi():
                             avg_df['centroid_lat'] = avg_df['geometry'].apply(lambda geom: geom.centroid.y if geom else None)
                             avg_df = avg_df.drop(columns=['geometry'])
 
+                        # Drop average-layer-specific columns to match regular layer schema
+                        # These columns exist only in average layer and cause column count mismatch
+                        avg_only_cols = ['volume_bin', 'is_average_layer', 'layer_count']
+                        cols_to_drop = [col for col in avg_only_cols if col in avg_df.columns]
+                        if cols_to_drop:
+                            avg_df = avg_df.drop(columns=cols_to_drop)
+                            logging.info(f"[CSV] Dropped average-specific columns: {cols_to_drop}")
+
                         # Add layer name
                         avg_df.insert(0, 'layer', 'average')
 
                         # Append to CSV with proper quoting
                         avg_df.to_csv(csv_path, mode='a', index=False, header=False,
-                                    quoting=csv.QUOTE_NONNUMERIC, encoding='utf-8')
+                                    quoting=csv.QUOTE_MINIMAL, encoding='utf-8', escapechar='\\')
                         logging.info(f"[CSV] Written average layer to {csv_path}")
                     except Exception as e:
                         logging.error(f"[CSV] Error writing average layer: {e}")
