@@ -95,6 +95,7 @@ from flask import Flask, request, jsonify, Response, send_file, after_this_reque
 from flask_cors import CORS
 import tempfile
 import pandas as pd
+import csv
 import logging
 import time
 import datetime as dt
@@ -2729,7 +2730,16 @@ def read_csv():
 
             # קריאת CSV
             try:
-                df = pd.read_csv(tmp_path)
+                # Read CSV with proper quoting to handle commas in text fields
+                # quoting=csv.QUOTE_NONNUMERIC ensures fields with commas are properly quoted
+                # on_bad_lines='skip' skips malformed rows instead of crashing
+                df = pd.read_csv(
+                    tmp_path,
+                    quoting=csv.QUOTE_NONNUMERIC,
+                    on_bad_lines='warn',  # Warn about bad lines but continue
+                    encoding='utf-8',
+                    engine='python'  # More flexible parser
+                )
                 if df.empty:
                     return jsonify({"error": "CSV file is empty"}), 400
 
@@ -3813,7 +3823,9 @@ def predict_multi():
 
                             # Append to CSV file (write header only for first layer)
                             write_header = not csv_path.exists()
-                            df_out.to_csv(csv_path, mode='a', index=False, header=write_header)
+                            # Use QUOTE_NONNUMERIC to properly quote text fields with commas (street names, geometry_wkt)
+                            df_out.to_csv(csv_path, mode='a', index=False, header=write_header,
+                                        quoting=csv.QUOTE_NONNUMERIC, encoding='utf-8')
                             logging.info(f"[CSV] Written layer '{layer_name}' to {csv_path}")
                         except Exception as e:
                             logging.error(f"[CSV] Error writing layer '{layer_name}': {e}")
@@ -3861,8 +3873,9 @@ def predict_multi():
                         # Add layer name
                         avg_df.insert(0, 'layer', 'average')
 
-                        # Append to CSV
-                        avg_df.to_csv(csv_path, mode='a', index=False, header=False)
+                        # Append to CSV with proper quoting
+                        avg_df.to_csv(csv_path, mode='a', index=False, header=False,
+                                    quoting=csv.QUOTE_NONNUMERIC, encoding='utf-8')
                         logging.info(f"[CSV] Written average layer to {csv_path}")
                     except Exception as e:
                         logging.error(f"[CSV] Error writing average layer: {e}")
