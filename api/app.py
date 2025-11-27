@@ -3372,7 +3372,7 @@ def calculate_average_layer(layers):
         return None
 
     return {
-        "name": "שכבה ממוצעת",
+        "name": "average",  # Use English key for frontend matching
         "geojson": {"type": "FeatureCollection", "features": average_features},
         "feature_count": len(average_features),
         "is_prediction_layer": True,
