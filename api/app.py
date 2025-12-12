@@ -3338,11 +3338,7 @@ def calculate_average_layer(layers):
             else:
                 feature_id = ("geom", str(feature.get("geometry", {})))
 
-            # Get the predicted class from this layer
-            volume_bin = props.get("volume_bin") or props.get("volume_class")
-            if volume_bin is None:
-                continue  # Skip if no prediction
-
+            # Initialize aggregation for this street if not already present
             agg = feature_aggregates.get(feature_id)
             if agg is None:
                 agg = {
@@ -3353,8 +3349,11 @@ def calculate_average_layer(layers):
                 }
                 feature_aggregates[feature_id] = agg
 
-            # Add this layer's prediction to the list
-            agg["volume_bins"].append(int(volume_bin))
+            # Get the predicted class from this layer
+            volume_bin = props.get("volume_bin") or props.get("volume_class")
+            if volume_bin is not None:
+                # Add this layer's prediction to the list
+                agg["volume_bins"].append(int(volume_bin))
 
             # Also keep track of probabilities for display purposes
             for i in range(1, 6):
@@ -3364,9 +3363,12 @@ def calculate_average_layer(layers):
 
     # בונים פיצ'רים ממוצעים
     average_features = []
+    skipped_count = 0
     for feature_id, agg in feature_aggregates.items():
         if not agg["volume_bins"]:
-            # No predictions for this street
+            # No predictions for this street across any layer
+            skipped_count += 1
+            logging.warning(f"[AVERAGE] Skipping street {feature_id} - no predictions in any layer")
             continue
 
         # Calculate average of predicted classes and floor it
@@ -3400,6 +3402,13 @@ def calculate_average_layer(layers):
     if not average_features:
         logging.warning("[AVERAGE] No streets ended up in the average layer")
         return None
+
+    total_tracked = len(feature_aggregates)
+    total_in_avg = len(average_features)
+    logging.info(f"[AVERAGE] Tracked {total_tracked} unique streets across all layers")
+    logging.info(f"[AVERAGE] Included {total_in_avg} streets in average layer")
+    if skipped_count > 0:
+        logging.warning(f"[AVERAGE] Skipped {skipped_count} streets (no predictions in any layer)")
 
     return {
         "name": "average",  # Use English key for frontend matching
