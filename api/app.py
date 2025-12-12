@@ -3249,11 +3249,13 @@ def build_search_timestamp(season: str, week_type: str, time_of_day: str) -> dat
 def calculate_average_layer(layers):
     """Calculate annual average prediction layer from multiple seasonal layers.
 
-    This version:
-    1. מנרמל מזהי רחובות (osmid / edge_id) כדי שתהיה התאמה בין שכבות שונות.
-    2. מחשב ממוצע גם אם רחוב לא מופיע בכל השכבות, כל עוד יש לו לפחות חיזוי אחד.
+    Simpler approach:
+    1. For each street, collect its predicted volume_bin from each layer
+    2. Average those predictions directly
+    3. Use floor to round down to final class
     """
     import logging
+    import math
 
     if not layers:
         return None
@@ -3267,7 +3269,7 @@ def calculate_average_layer(layers):
     if base_layer is None:
         return None
 
-    # ✔ פתרון 2 – פונקציה שמנרמלת מזהי רחוב
+    # ✔ פונקציה שמנרמלת מזהי רחוב
     def normalize_id(id_value):
         if id_value is None:
             return None
@@ -3323,7 +3325,7 @@ def calculate_average_layer(layers):
                 f"{original_count - len(unique_features)} duplicate features"
             )
 
-        # אוספים הסתברויות לכל רחוב
+        # אוספים את volume_bin (המחלקה החזויה) מכל שכבה
         for feature in unique_features:
             props = feature.get("properties", {}) or {}
             osmid = normalize_id(props.get("osmid"))
@@ -3336,45 +3338,56 @@ def calculate_average_layer(layers):
             else:
                 feature_id = ("geom", str(feature.get("geometry", {})))
 
+            # Get the predicted class from this layer
+            volume_bin = props.get("volume_bin") or props.get("volume_class")
+            if volume_bin is None:
+                continue  # Skip if no prediction
+
             agg = feature_aggregates.get(feature_id)
             if agg is None:
                 agg = {
                     "geometry": feature.get("geometry"),
                     "properties": props.copy(),
-                    "probability_sums": [0.0] * 5,  # מחלקות 1-5
-                    "count": 0,
+                    "volume_bins": [],  # List of predicted classes
+                    "probability_sums": [0.0] * 5,  # Keep probabilities for display
                 }
                 feature_aggregates[feature_id] = agg
 
-            # ✔ פתרון 1 – להשתמש בכל חיזוי קיים, אם יש
+            # Add this layer's prediction to the list
+            agg["volume_bins"].append(int(volume_bin))
+
+            # Also keep track of probabilities for display purposes
             for i in range(1, 6):
                 prob = props.get(f"proba_{i}")
                 if prob is not None:
                     agg["probability_sums"][i - 1] += float(prob)
 
-            # נספור שכבה רק אם הייתה לפחות הסתברות אחת לרחוב הזה
-            if any(props.get(f"proba_{i}") is not None for i in range(1, 6)):
-                agg["count"] += 1
-
     # בונים פיצ'רים ממוצעים
     average_features = []
     for feature_id, agg in feature_aggregates.items():
-        if agg["count"] == 0:
-            # לא הייתה אף שכבה עם תחזית לרחוב הזה
+        if not agg["volume_bins"]:
+            # No predictions for this street
             continue
 
-        avg_probs = [s / agg["count"] for s in agg["probability_sums"]]
-        max_prob = max(avg_probs)
-        best_class = avg_probs.index(max_prob) + 1
+        # Calculate average of predicted classes and floor it
+        avg_volume = sum(agg["volume_bins"]) / len(agg["volume_bins"])
+        final_class = math.floor(avg_volume)
+
+        # Ensure class is in valid range [1, 5]
+        final_class = max(1, min(5, final_class))
 
         props = agg["properties"].copy()
-        props["volume_bin"] = int(best_class)
-        props["proba_top"] = float(max_prob)
+        props["volume_bin"] = int(final_class)
+
+        # Calculate average probabilities for display
+        count = len(agg["volume_bins"])
+        avg_probs = [s / count for s in agg["probability_sums"]]
+        props["proba_top"] = float(max(avg_probs)) if avg_probs else 0.0
         for i in range(1, 6):
             props[f"proba_{i}"] = float(avg_probs[i - 1])
 
         props["is_average_layer"] = True
-        props["layer_count"] = agg["count"]
+        props["layer_count"] = count
 
         average_features.append(
             {
